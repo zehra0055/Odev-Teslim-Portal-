@@ -1,7 +1,15 @@
 "use strict";
 console.count("PAGE JS INIT");
 
-const API_BASE = "http://localhost:3000";
+// ==========================
+//  Öğrenci Auth (BACKEND API)
+//  - POST /api/auth/register
+//  - POST /api/auth/login
+//  - fetch hatası fix: relative URL
+//  - input name/id uyuşmazlığı fix: id ile okur
+//  - hata mesajlarını ezmez (debug kolay)
+// ==========================
+
 const ROLE = "student";
 const PANEL_URL = "/Ogrenci/ogrenci-panel.html";
 
@@ -21,13 +29,22 @@ const forgotBtn = document.getElementById("forgotBtn");
 const closeModal = document.getElementById("closeModal");
 const okModal = document.getElementById("okModal");
 
+// strength UI
+const strengthBar = document.getElementById("strengthBar");
+const strengthText = document.getElementById("strengthText");
+const regPasswordInput = document.getElementById("regPassword");
+
 let busy = false;
 
 console.log("ogrenci-giris.js yüklendi ✅");
 
 // ---- helpers ----
 function setAlert(el, type, text) {
-  if (!el) return;
+  if (!el) {
+    console.warn("Alert elementi yok:", type, text);
+    alert(text);
+    return;
+  }
   el.hidden = false;
   el.className = "alert " + type;
   el.textContent = text;
@@ -43,29 +60,41 @@ function setLoading(btn, v) {
   btn.classList.toggle("loading", v);
 }
 function setTab(name) {
-  tabs.forEach(t => {
+  tabs.forEach((t) => {
     const active = t.dataset.tab === name;
     t.classList.toggle("active", active);
     t.setAttribute("aria-selected", String(active));
   });
+
   if (loginForm) loginForm.classList.toggle("active", name === "login");
   if (registerForm) registerForm.classList.toggle("active", name === "register");
+
   clearAlert(loginAlert);
   clearAlert(regAlert);
+}
+
+function v(id) {
+  return (document.getElementById(id)?.value || "").trim();
+}
+function vRaw(id) {
+  return (document.getElementById(id)?.value || "");
+}
+function normalizeEmail(s) {
+  return String(s || "").trim().toLowerCase();
+}
+
+async function safeJson(res) {
+  try { return await res.json(); }
+  catch { return {}; }
 }
 
 // ---- UI EVENTS (TAB / JUMP) ----
 document.addEventListener("click", (e) => {
   const tabBtn = e.target.closest(".tab");
-  if (tabBtn) {
-    setTab(tabBtn.dataset.tab);
-    return;
-  }
+  if (tabBtn) return setTab(tabBtn.dataset.tab);
+
   const jumpBtn = e.target.closest("[data-jump]");
-  if (jumpBtn) {
-    setTab(jumpBtn.dataset.jump);
-    return;
-  }
+  if (jumpBtn) return setTab(jumpBtn.dataset.jump);
 });
 
 // ---- password toggle (👁️) ----
@@ -79,11 +108,7 @@ document.addEventListener("click", (e) => {
 
   const isHidden = input.type === "password";
   input.type = isHidden ? "text" : "password";
-
-  // ikon değiştir (👁️ <-> 🙈)
   btn.textContent = isHidden ? "👁️" : "🙈";
-
-  // aria-label güncelle
   btn.setAttribute("aria-label", isHidden ? "Şifreyi gizle" : "Şifreyi göster");
 });
 
@@ -111,15 +136,15 @@ document.addEventListener("keydown", (e) => {
   if (e.key === "Escape") closeModalFn();
 });
 
-
 // ---- auto redirect (SAFE) ----
+// Debug için: ?noredirect=1 ekleyince yönlendirme yapmaz
 (() => {
+  if (location.search.includes("noredirect=1")) return;
+
   try {
     const token = localStorage.getItem("token");
     const role = localStorage.getItem("role");
 
-    // Login sayfasındaysak ve token+rol uygunsa → panel
-    // Ama zaten paneldeysek tekrar atlama
     if (token && role === ROLE) {
       if (window.location.pathname !== PANEL_URL) {
         window.location.replace(PANEL_URL);
@@ -129,7 +154,6 @@ document.addEventListener("keydown", (e) => {
     console.warn("Auto redirect iptal edildi:", e);
   }
 })();
-
 
 // ---- LOGIN ----
 loginForm?.addEventListener("submit", async (e) => {
@@ -141,26 +165,37 @@ loginForm?.addEventListener("submit", async (e) => {
   setLoading(loginSubmit, true);
 
   try {
-    const email = loginForm.loginEmail.value.trim();
-    const password = loginForm.loginPassword.value;
+    // id üzerinden oku (HTML name uyuşmazsa bile çalışır)
+    const email = normalizeEmail(v("loginEmail"));
+    const password = vRaw("loginPassword");
 
-    const res = await fetch(`${API_BASE}/api/auth/login`, {
+    if (!email || !password) {
+      throw new Error("E-posta ve şifre zorunlu.");
+    }
+
+    const res = await fetch(`/api/auth/login`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ role: ROLE, email, password })
+      body: JSON.stringify({ role: ROLE, email, password }),
     });
 
-    const data = await res.json();
-    if (!data.ok) throw new Error(data.message || "Giriş başarısız");
+    const data = await safeJson(res);
+    console.log("LOGIN RES:", res.status, data);
 
+    if (!res.ok || !data.ok) {
+      throw new Error(data.message || `Giriş başarısız (HTTP ${res.status})`);
+    }
+
+    // rememberMe varsa tokenı farklı yerde saklamak istersen buradan yönetebilirsin
     localStorage.setItem("token", data.token);
     localStorage.setItem("role", ROLE);
-    localStorage.setItem("user", JSON.stringify(data.user));
+    localStorage.setItem("user", JSON.stringify(data.user || {}));
+    localStorage.setItem("remember", rememberMe?.checked ? "1" : "0");
 
     window.location.replace(PANEL_URL);
   } catch (err) {
-    console.error(err);
-    setAlert(loginAlert, "err", "E-posta veya şifre hatalı");
+    console.error("LOGIN ERR:", err);
+    setAlert(loginAlert, "err", err?.message || "Giriş başarısız");
   } finally {
     busy = false;
     setLoading(loginSubmit, false);
@@ -177,84 +212,77 @@ registerForm?.addEventListener("submit", async (e) => {
   setLoading(regSubmit, true);
 
   try {
-    const name = `${registerForm.regFirstName.value.trim()} ${registerForm.regLastName.value.trim()}`.trim();
-    const email = registerForm.regEmail.value.trim();
-    const password = registerForm.regPassword.value;
+    const first = v("regFirstName");
+    const last = v("regLastName");
+    const name = `${first} ${last}`.trim();
 
-    const res = await fetch(`${API_BASE}/api/auth/register`, {
+    const email = normalizeEmail(v("regEmail"));
+    const password = vRaw("regPassword");
+
+    if (!name || !email || !password) {
+      throw new Error("Lütfen tüm alanları doldur (Ad, Soyad, Email, Şifre).");
+    }
+
+    const res = await fetch(`/api/auth/register`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ role: ROLE, name, email, password })
+      body: JSON.stringify({ role: ROLE, name, email, password }),
     });
 
-    const data = await res.json();
-    if (!data.ok) throw new Error(data.message || "Kayıt başarısız");
+    const data = await safeJson(res);
+    console.log("REGISTER RES:", res.status, data);
+
+    if (!res.ok || !data.ok) {
+      throw new Error(data.message || `Kayıt başarısız (HTTP ${res.status})`);
+    }
 
     setAlert(regAlert, "ok", "Kayıt başarılı. Giriş yapabilirsin.");
     setTab("login");
   } catch (err) {
-    console.error(err);
-    setAlert(regAlert, "err", "Kayıt başarısız (email kullanılıyor olabilir)");
+    console.error("REGISTER ERR:", err);
+    setAlert(regAlert, "err", err?.message || "Kayıt başarısız");
   } finally {
     busy = false;
     setLoading(regSubmit, false);
   }
 });
+
 // ==========================
 // Şifre gücü barı (UI)
 // ==========================
-const strengthBar = document.getElementById("strengthBar");
-const strengthText = document.getElementById("strengthText");
-
 function calcStrength(pw) {
   let score = 0;
+  if (!pw) return { label: "—", pct: 0 };
 
-  if (!pw) return { score: 0, label: "—", pct: 0 };
-
-  // uzunluk
   if (pw.length >= 6) score++;
   if (pw.length >= 10) score++;
 
-  // karakter çeşitliliği
   if (/[a-z]/.test(pw)) score++;
   if (/[A-Z]/.test(pw)) score++;
   if (/[0-9]/.test(pw)) score++;
   if (/[^A-Za-z0-9]/.test(pw)) score++;
 
-  // tekrar/çok basit şifreleri biraz kırp
   if (/^(.)\1+$/.test(pw)) score = Math.max(0, score - 2);
 
-  // 0-6 arası skor -> yüzdelik
   const pct = Math.min(100, Math.round((score / 6) * 100));
 
-  let label = "Zayıf";
+  let label = "Çok zayıf";
   if (score >= 5) label = "Çok güçlü";
   else if (score >= 4) label = "Güçlü";
   else if (score >= 3) label = "Orta";
   else if (score >= 2) label = "Zayıf";
-  else label = "Çok zayıf";
 
-  return { score, label, pct };
+  return { label, pct };
 }
 
 function updateStrengthUI(pw) {
   if (!strengthBar || !strengthText) return;
-
   const { label, pct } = calcStrength(pw);
-
-  // span width'ünü güncelle (renk vermiyoruz, CSS halleder)
   strengthBar.style.width = pct + "%";
   strengthText.textContent = `Şifre gücü: ${pw ? label : "—"}`;
 }
 
-// register şifre inputu
-const regPasswordInput = document.getElementById("regPassword");
 if (regPasswordInput) {
-  // sayfa yüklenince
   updateStrengthUI(regPasswordInput.value);
-
-  // yazdıkça
-  regPasswordInput.addEventListener("input", () => {
-    updateStrengthUI(regPasswordInput.value);
-  });
+  regPasswordInput.addEventListener("input", () => updateStrengthUI(regPasswordInput.value));
 }

@@ -1,7 +1,14 @@
 "use strict";
 console.count("PAGE JS INIT");
 
-const API_BASE = "http://localhost:3000";
+// ==========================
+//  Öğretmen Auth (BACKEND API)
+//  - POST /api/auth/register
+//  - POST /api/auth/login
+//  - fetch hatası fix: relative URL kullanır
+//  - input name/id uyuşmazlığı fix: id ile okur
+// ==========================
+
 const ROLE = "teacher";
 const PANEL_URL = "/Ogretmen/ogretmen-panel.html";
 
@@ -32,7 +39,11 @@ console.log("ogretmen-giris.js yüklendi ✅");
 
 // ---- helpers ----
 function setAlert(el, type, text) {
-  if (!el) return;
+  if (!el) {
+    console.warn("Alert elementi yok:", type, text);
+    alert(text);
+    return;
+  }
   el.hidden = false;
   el.className = "alert " + type;
   el.textContent = text;
@@ -64,15 +75,10 @@ function setTab(name) {
 // ---- UI EVENTS (TAB / JUMP) ----
 document.addEventListener("click", (e) => {
   const tabBtn = e.target.closest(".tab");
-  if (tabBtn) {
-    setTab(tabBtn.dataset.tab);
-    return;
-  }
+  if (tabBtn) return setTab(tabBtn.dataset.tab);
+
   const jumpBtn = e.target.closest("[data-jump]");
-  if (jumpBtn) {
-    setTab(jumpBtn.dataset.jump);
-    return;
-  }
+  if (jumpBtn) return setTab(jumpBtn.dataset.jump);
 });
 
 // ---- password toggle (👁️) ----
@@ -87,13 +93,9 @@ document.addEventListener("click", (e) => {
   const isHidden = input.type === "password";
   input.type = isHidden ? "text" : "password";
 
-  // ikon değiştir (👁️ <-> 🙈)
   btn.textContent = isHidden ? "👁️" : "🙈";
-
-  // aria-label güncelle
   btn.setAttribute("aria-label", isHidden ? "Şifreyi gizle" : "Şifreyi göster");
 });
-
 
 // ---- forgot modal (demo) ----
 function openModal() {
@@ -155,7 +157,6 @@ if (regPasswordInput) {
 }
 
 // ---- auto redirect (SAFE) ----
-// ✅ ARTIK "return" top-level yok. Hepsi IIFE içinde.
 (() => {
   if (location.search.includes("noredirect=1")) return;
 
@@ -163,9 +164,7 @@ if (regPasswordInput) {
     const token = localStorage.getItem("token");
     const role = localStorage.getItem("role");
 
-    // login sayfasındaysak ve token+rol uygunsa → panel
     if (token && role === ROLE) {
-      // PANEL_URL absolute path ("/Ogretmen/...") olduğu için pathname ile kıyas OK
       if (window.location.pathname !== PANEL_URL) {
         window.location.replace(PANEL_URL);
       }
@@ -174,6 +173,17 @@ if (regPasswordInput) {
     console.warn("Auto redirect iptal edildi:", e);
   }
 })();
+
+// ---- helpers for inputs ----
+function v(id) {
+  return (document.getElementById(id)?.value || "").trim();
+}
+function vRaw(id) {
+  return (document.getElementById(id)?.value || "");
+}
+function normalizeEmail(s) {
+  return String(s || "").trim().toLowerCase();
+}
 
 // ---- LOGIN ----
 loginForm?.addEventListener("submit", async (e) => {
@@ -185,27 +195,33 @@ loginForm?.addEventListener("submit", async (e) => {
   setLoading(loginSubmit, true);
 
   try {
-    const email = loginForm.loginEmail.value.trim();
-    const password = loginForm.loginPassword.value;
+    const email = normalizeEmail(v("loginEmail"));
+    const password = vRaw("loginPassword");
 
-    const res = await fetch(`${API_BASE}/api/auth/login`, {
+    if (!email || !password) {
+      throw new Error("E-posta ve şifre zorunlu.");
+    }
+
+    const res = await fetch(`/api/auth/login`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ role: ROLE, email, password }),
     });
 
-    let data = {};
-    try { data = await res.json(); } catch {}
+    const data = await res.json().catch(() => ({}));
+    console.log("LOGIN RES:", res.status, data);
 
-    if (!res.ok || !data.ok) throw new Error(data.message || "Giriş başarısız");
+    if (!res.ok || !data.ok) {
+      throw new Error(data.message || `Giriş başarısız (HTTP ${res.status})`);
+    }
 
     localStorage.setItem("token", data.token);
     localStorage.setItem("role", ROLE);
-    localStorage.setItem("user", JSON.stringify(data.user));
+    localStorage.setItem("user", JSON.stringify(data.user || {}));
 
     window.location.replace(PANEL_URL);
   } catch (err) {
-    console.error(err);
+    console.error("LOGIN ERR:", err);
     setAlert(loginAlert, "err", err?.message || "Giriş başarısız");
   } finally {
     busy = false;
@@ -220,7 +236,7 @@ registerForm?.addEventListener("submit", async (e) => {
 
   clearAlert(regAlert);
 
-  // ✅ Şartlar tiklenmediyse kayıt olmasın (istersen kaldırırım)
+  // Şartlar tiklenmediyse kayıt olmasın (istersen kaldırabilirsin)
   if (terms && !terms.checked) {
     setAlert(regAlert, "err", "Devam etmek için şartları kabul etmelisin.");
     return;
@@ -230,25 +246,34 @@ registerForm?.addEventListener("submit", async (e) => {
   setLoading(regSubmit, true);
 
   try {
-    const name = `${registerForm.regFirstName.value.trim()} ${registerForm.regLastName.value.trim()}`.trim();
-    const email = registerForm.regEmail.value.trim();
-    const password = registerForm.regPassword.value;
+    const first = v("regFirstName");
+    const last = v("regLastName");
+    const name = `${first} ${last}`.trim();
 
-    const res = await fetch(`${API_BASE}/api/auth/register`, {
+    const email = normalizeEmail(v("regEmail"));
+    const password = vRaw("regPassword");
+
+    if (!name || !email || !password) {
+      throw new Error("Lütfen tüm alanları doldur (Ad, Soyad, Email, Şifre).");
+    }
+
+    const res = await fetch(`/api/auth/register`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ role: ROLE, name, email, password }),
     });
 
-    let data = {};
-    try { data = await res.json(); } catch {}
+    const data = await res.json().catch(() => ({}));
+    console.log("REGISTER RES:", res.status, data);
 
-    if (!res.ok || !data.ok) throw new Error(data.message || "Kayıt başarısız");
+    if (!res.ok || !data.ok) {
+      throw new Error(data.message || `Kayıt başarısız (HTTP ${res.status})`);
+    }
 
     setAlert(regAlert, "ok", "Kayıt başarılı. Giriş yapabilirsin.");
     setTab("login");
   } catch (err) {
-    console.error(err);
+    console.error("REGISTER ERR:", err);
     setAlert(regAlert, "err", err?.message || "Kayıt başarısız");
   } finally {
     busy = false;
