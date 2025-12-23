@@ -5,10 +5,15 @@ const express = require("express");
 const cors = require("cors");
 const path = require("path");
 const { MongoClient } = require("mongodb");
+const bcrypt = require("bcrypt");
+const crypto = require("crypto");
+const nodemailer = require("nodemailer");
+
 
 console.log("SERVER.JS LOADED ✅", __filename);
 
 const app = express();
+
 const PORT = process.env.PORT || 3000;
 
 // ✅ Render'a koyduğun ENV
@@ -206,3 +211,203 @@ async function start() {
 const connectDB = require("./db");
 
 start();
+
+const bcrypt = require("bcrypt");
+const crypto = require("crypto");
+const nodemailer = require("nodemailer");
+
+// ====== Mail Transporter ======
+const transporter = nodemailer.createTransport({
+  host: process.env.SMTP_HOST,
+  port: Number(process.env.SMTP_PORT || 587),
+  secure: false,
+  auth: {
+    user: process.env.SMTP_USER,
+    pass: process.env.SMTP_PASS
+  }
+});
+
+const RESET_CODE_TTL_MIN = Number(process.env.RESET_CODE_TTL_MIN || 10);
+const RESET_TOKEN_TTL_MIN = Number(process.env.RESET_TOKEN_TTL_MIN || 15);
+
+function nowPlusMinutes(min) {
+  return new Date(Date.now() + min * 60 * 1000);
+}
+
+function gen6DigitCode() {
+  // 100000-999999
+  return String(Math.floor(100000 + Math.random() * 900000));
+}
+
+function genToken() {
+  return crypto.randomBytes(32).toString("hex");
+}
+
+function normalizeEmail(s) {
+  return String(s || "").trim().toLowerCase();
+}
+
+// Kullanıcı collection’ını senin db.js’e göre ayarla:
+function usersCol(db) {
+  return db.collection("users"); // sende farklıysa değiştir
+}
+
+// ====== 1) FORGOT: kod gönder ======
+app.post("/api/auth/forgot", async (req, res) => {
+  try {
+    const { role, email } = req.body || {};
+    const emailNorm = normalizeEmail(email);
+
+    // güvenlik: her zaman ok dön
+    if (!emailNorm) return res.json({ ok: true });
+
+    const db = req.app.locals.db; // sende db erişimi farklıysa söyle
+    const col = usersCol(db);
+
+    const user = await col.findOne({ role, email: emailNorm });
+
+    if (!user) {
+      // var/yok belli etme
+      return res.json({ ok: true });
+    }
+
+    const code = gen6DigitCode();
+    const codeHash = await bcrypt.hash(code, 10);
+
+    await col.updateOne(
+      { _id: user._id },
+      {
+        $set: {
+          resetCodeHash: codeHash,
+          resetCodeExp: nowPlusMinutes(RESET_CODE_TTL_MIN),
+          resetCodeTries: 0
+        },
+        $unset: {
+          resetToken: "",
+          resetTokenExp: ""
+        }
+      }
+    );
+
+    // Mail gönder
+    const from = process.env.SMTP_FROM || process.env.SMTP_USER;
+    await transporter.sendMail({
+      from,
+      to: emailNorm,
+      subject: "Şifre Sıfırlama Kodu",
+      text:
+        `Şifre sıfırlama kodun: ${code}\n` +
+        `Bu kod ${RESET_CODE_TTL_MIN} dakika geçerlidir.\n` +
+        `Eğer bu işlemi sen yapmadıysan bu maili yok say.`
+    });
+
+    return res.json({ ok: true });
+  } catch (err) {
+    console.error("FORGOT ERROR:", err);
+    // güvenlik: yine ok dön
+    return res.json({ ok: true });
+  }
+});
+
+// ====== 2) VERIFY: kodu doğrula -> resetToken üret ======
+app.post("/api/auth/reset/verify", async (req, res) => {
+  try {
+    const { role, email, code } = req.body || {};
+    const emailNorm = normalizeEmail(email);
+    const codeStr = String(code || "").trim();
+
+    if (!emailNorm || !codeStr) {
+      return res.status(400).json({ ok: false, message: "E-posta ve kod gerekli." });
+    }
+
+    const db = req.app.locals.db;
+    const col = usersCol(db);
+
+    const user = await col.findOne({ role, email: emailNorm });
+    if (!user || !user.resetCodeHash || !user.resetCodeExp) {
+      return res.status(400).json({ ok: false, message: "Kod geçersiz veya süresi dolmuş." });
+    }
+
+    if (new Date(user.resetCodeExp) < new Date()) {
+      return res.status(400).json({ ok: false, message: "Kodun süresi dolmuş." });
+    }
+
+    const tries = Number(user.resetCodeTries || 0);
+    if (tries >= 5) {
+      return res.status(429).json({ ok: false, message: "Çok fazla deneme. Yeni kod iste." });
+    }
+
+    const ok = await bcrypt.compare(codeStr, user.resetCodeHash);
+    if (!ok) {
+      await col.updateOne({ _id: user._id }, { $inc: { resetCodeTries: 1 } });
+      return res.status(400).json({ ok: false, message: "Kod yanlış." });
+    }
+
+    const token = genToken();
+    await col.updateOne(
+      { _id: user._id },
+      {
+        $set: {
+          resetToken: token,
+          resetTokenExp: nowPlusMinutes(RESET_TOKEN_TTL_MIN)
+        }
+      }
+    );
+
+    return res.json({ ok: true, resetToken: token });
+  } catch (err) {
+    console.error("VERIFY ERROR:", err);
+    return res.status(500).json({ ok: false, message: "Sunucu hatası." });
+  }
+});
+
+// ====== 3) RESET: token ile şifreyi değiştir ======
+app.post("/api/auth/reset", async (req, res) => {
+  try {
+    const { role, email, resetToken, newPassword } = req.body || {};
+    const emailNorm = normalizeEmail(email);
+    const token = String(resetToken || "").trim();
+    const pw = String(newPassword || "");
+
+    if (!emailNorm || !token || !pw) {
+      return res.status(400).json({ ok: false, message: "Eksik bilgi." });
+    }
+    if (pw.length < 6) {
+      return res.status(400).json({ ok: false, message: "Şifre en az 6 karakter olmalı." });
+    }
+
+    const db = req.app.locals.db;
+    const col = usersCol(db);
+
+    const user = await col.findOne({ role, email: emailNorm });
+    if (!user || user.resetToken !== token || !user.resetTokenExp) {
+      return res.status(400).json({ ok: false, message: "Yetkisiz veya süresi dolmuş." });
+    }
+    if (new Date(user.resetTokenExp) < new Date()) {
+      return res.status(400).json({ ok: false, message: "Sıfırlama oturumu süresi dolmuş." });
+    }
+
+    // Eğer sistemde şifreler plain tutuluyorsa bu noktadan itibaren HASH’e geçiyoruz.
+    const passwordHash = await bcrypt.hash(pw, 10);
+
+    await col.updateOne(
+      { _id: user._id },
+      {
+        $set: { password: passwordHash },
+        $unset: {
+          resetCodeHash: "",
+          resetCodeExp: "",
+          resetCodeTries: "",
+          resetToken: "",
+          resetTokenExp: ""
+        }
+      }
+    );
+
+    return res.json({ ok: true });
+  } catch (err) {
+    console.error("RESET ERROR:", err);
+    return res.status(500).json({ ok: false, message: "Sunucu hatası." });
+  }
+});
+

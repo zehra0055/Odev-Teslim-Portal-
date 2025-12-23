@@ -194,20 +194,20 @@
           <div class="row">
             <div class="field">
               <label for="name">Ad Soyad</label>
-              <input id="name" type="text" placeholder="Adınız Soyadınız" />
+              <input id="name" name="name" type="text" placeholder="Adınız Soyadınız" autocomplete="name" required />
             </div>
             <div class="field">
               <label for="email">E-posta</label>
-              <input id="email" type="email" placeholder="ornek@mail.com" />
+              <input id="email" name="email" type="email" placeholder="ornek@mail.com" autocomplete="email" required />
             </div>
           </div>
 
           <div class="field">
             <label for="message">Mesaj</label>
-            <textarea id="message" rows="5" placeholder="Mesajınızı yazın..."></textarea>
+            <textarea id="message" name="message" rows="5" placeholder="Mesajınızı yazın..." required></textarea>
           </div>
 
-          <button class="btn primary" type="submit">Gönder</button>
+          <button class="btn primary" type="submit">Mail ile Gönder</button>
           <div class="form-alert" id="formAlert" hidden></div>
         </form>
 
@@ -215,7 +215,7 @@
           <div class="side-card">
             <div class="side-title">Hızlı Bilgi</div>
             <div class="side-item"><span>📍</span> Okul / Kampüs / Kurum</div>
-            <div class="side-item"><span>📧</span> destek@odevportal.com</div>
+            <div class="side-item"><span>📧</span> odevportaldestek@gmail.com</div>
             <div class="side-item"><span>🕒</span> Hafta içi 09:00 - 18:00</div>
           </div>
 
@@ -223,7 +223,7 @@
             <div class="side-title">Sık Sorulan</div>
             <details>
               <summary>Dosya türü sınırı var mı?</summary>
-              <p>İleride PDF/DOCX/ZIP gibi türler eklenebilir. Şimdilik tasarım demo.</p>
+              <p>İleride PDF/DOCX/ZIP gibi türler eklenebilir.</p>
             </details>
             <details>
               <summary>Öğretmen notu nasıl verir?</summary>

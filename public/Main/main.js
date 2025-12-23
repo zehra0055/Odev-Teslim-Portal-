@@ -28,7 +28,7 @@ hamburger?.addEventListener("click", (e) => {
 });
 
 // Menüden bir şeye basınca kapansın
-$$(".menu a").forEach(a => {
+$$(".menu a").forEach((a) => {
   a.addEventListener("click", () => closeMenu());
 });
 
@@ -71,9 +71,9 @@ const stat2 = $("#stat2");
 const stat3 = $("#stat3");
 
 const targets = [
-  { el: stat1, value: 128 },     // istediğin sayıyı yaz
-  { el: stat2, value: 542 },     // istediğin sayıyı yaz
-  { el: stat3, value: 4.8 }      // örnek ortalama
+  { el: stat1, value: 128 }, // istediğin sayıyı yaz
+  { el: stat2, value: 542 }, // istediğin sayıyı yaz
+  { el: stat3, value: 4.8 }, // örnek ortalama
 ];
 
 function animateNumber(el, to, duration = 900) {
@@ -89,9 +89,7 @@ function animateNumber(el, to, duration = 900) {
 
     const current = from + (to - from) * eased;
 
-    el.textContent = isFloat
-      ? current.toFixed(1)
-      : Math.round(current).toString();
+    el.textContent = isFloat ? current.toFixed(1) : Math.round(current).toString();
 
     if (t < 1) requestAnimationFrame(tick);
   }
@@ -104,21 +102,27 @@ const statsWrap = document.querySelector(".hero-stats");
 let statsPlayed = false;
 
 if (statsWrap) {
-  const io = new IntersectionObserver((entries) => {
-    const entry = entries[0];
-    if (entry.isIntersecting && !statsPlayed) {
-      statsPlayed = true;
-      targets.forEach(x => animateNumber(x.el, x.value));
-      io.disconnect();
-    }
-  }, { threshold: 0.35 });
+  const io = new IntersectionObserver(
+    (entries) => {
+      const entry = entries[0];
+      if (entry.isIntersecting && !statsPlayed) {
+        statsPlayed = true;
+        targets.forEach((x) => animateNumber(x.el, x.value));
+        io.disconnect();
+      }
+    },
+    { threshold: 0.35 }
+  );
 
   io.observe(statsWrap);
 }
 
-// ========= Contact Form (demo) =========
+// ========= Contact Form (REAL: mailto) =========
 const form = $("#contactForm");
 const alertBox = $("#formAlert");
+
+// mailin gideceği adres:
+const SUPPORT_MAIL = "odevportaldestek@gmail.com";
 
 function showAlert(msg, type = "ok") {
   if (!alertBox) return;
@@ -127,18 +131,23 @@ function showAlert(msg, type = "ok") {
   alertBox.className = "form-alert " + type;
 }
 
+function isValidEmail(email) {
+  // basit ama sağlam bir kontrol
+  return /^[^\s@]+@[^\s@]+\.[^\s@]{2,}$/.test(email);
+}
+
 form?.addEventListener("submit", (e) => {
   e.preventDefault();
 
-  const name = $("#name")?.value.trim();
-  const email = $("#email")?.value.trim();
-  const message = $("#message")?.value.trim();
+  const name = $("#name")?.value.trim() || "";
+  const email = $("#email")?.value.trim() || "";
+  const message = $("#message")?.value.trim() || "";
 
   if (!name || name.length < 3) {
     showAlert("Lütfen ad soyad alanını en az 3 karakter olacak şekilde doldur.", "err");
     return;
   }
-  if (!email || !email.includes("@") || !email.includes(".")) {
+  if (!email || !isValidEmail(email)) {
     showAlert("Lütfen geçerli bir e-posta gir.", "err");
     return;
   }
@@ -147,8 +156,19 @@ form?.addEventListener("submit", (e) => {
     return;
   }
 
-  // Demo: gerçek gönderim yok
-  showAlert("Mesajın alındı! (Demo) En kısa sürede dönüş yapılacak.", "ok");
+  // mailto içeriği
+  const subject = encodeURIComponent("Ödev Teslim Portalı | Destek");
+  const body = encodeURIComponent(
+    `Ad Soyad: ${name}\nE-posta: ${email}\n\nMesaj:\n${message}\n`
+  );
+
+  // kullanıcıya bilgi
+  showAlert("Mail uygulaman açılıyor… Gönder’e basınca mesajın bize ulaşacak ✅", "ok");
+
+  // mail uygulamasını aç
+  window.location.href = `mailto:${SUPPORT_MAIL}?subject=${subject}&body=${body}`;
+
+  // formu temizle (istersen kaldırabiliriz)
   form.reset();
 
   setTimeout(() => {

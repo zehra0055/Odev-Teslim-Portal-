@@ -2,12 +2,14 @@
 console.count("PAGE JS INIT");
 
 // ==========================
-//  Öğrenci Auth (BACKEND API)
+//  Öğrenci Auth + Password Reset (OTP)
 //  - POST /api/auth/register
 //  - POST /api/auth/login
-//  - fetch hatası fix: relative URL
-//  - input name/id uyuşmazlığı fix: id ile okur
-//  - hata mesajlarını ezmez (debug kolay)
+//  - POST /api/auth/forgot
+//  - POST /api/auth/reset/verify
+//  - POST /api/auth/reset
+//  - fetch: relative URL
+//  - input: id üzerinden okur
 // ==========================
 
 const ROLE = "student";
@@ -27,12 +29,34 @@ const rememberMe = document.getElementById("rememberMe");
 const modal = document.getElementById("modal");
 const forgotBtn = document.getElementById("forgotBtn");
 const closeModal = document.getElementById("closeModal");
-const okModal = document.getElementById("okModal");
 
 // strength UI
 const strengthBar = document.getElementById("strengthBar");
 const strengthText = document.getElementById("strengthText");
 const regPasswordInput = document.getElementById("regPassword");
+const terms = document.getElementById("terms");
+
+// ===== Forgot/Reset Modal DOM (3 STEP) =====
+const forgotForm = document.getElementById("forgotForm");
+const forgotEmail = document.getElementById("forgotEmail");
+const forgotMsg = document.getElementById("forgotMsg");
+const forgotSubmit = document.getElementById("forgotSubmit");
+const forgotAlert = document.getElementById("forgotAlert");
+
+const codeForm = document.getElementById("codeForm");
+const resetCode = document.getElementById("resetCode");
+const codeMsg = document.getElementById("codeMsg");
+const codeSubmit = document.getElementById("codeSubmit");
+const codeAlert = document.getElementById("codeAlert");
+const resendCodeBtn = document.getElementById("resendCodeBtn");
+
+const resetForm = document.getElementById("resetForm");
+const newPassword = document.getElementById("newPassword");
+const resetMsg = document.getElementById("resetMsg");
+const resetSubmit = document.getElementById("resetSubmit");
+const resetAlert = document.getElementById("resetAlert");
+
+const backToLoginBtn = document.getElementById("backToLoginBtn");
 
 let busy = false;
 
@@ -82,10 +106,13 @@ function vRaw(id) {
 function normalizeEmail(s) {
   return String(s || "").trim().toLowerCase();
 }
-
 async function safeJson(res) {
   try { return await res.json(); }
   catch { return {}; }
+}
+function setInlineMsg(el, text) {
+  if (!el) return;
+  el.textContent = text || "";
 }
 
 // ---- UI EVENTS (TAB / JUMP) ----
@@ -108,36 +135,48 @@ document.addEventListener("click", (e) => {
 
   const isHidden = input.type === "password";
   input.type = isHidden ? "text" : "password";
+
   btn.textContent = isHidden ? "👁️" : "🙈";
   btn.setAttribute("aria-label", isHidden ? "Şifreyi gizle" : "Şifreyi göster");
 });
 
-// ---- forgot modal (demo) ----
-function openModal() {
-  if (!modal) return;
-  modal.setAttribute("aria-hidden", "false");
-  modal.classList.add("open");
-}
-function closeModalFn() {
-  if (!modal) return;
-  modal.setAttribute("aria-hidden", "true");
-  modal.classList.remove("open");
-}
+// ---- password strength ----
+function calcStrength(pw) {
+  let score = 0;
+  if (!pw) return { label: "—", pct: 0 };
 
-if (forgotBtn) forgotBtn.addEventListener("click", openModal);
-if (closeModal) closeModal.addEventListener("click", closeModalFn);
-if (okModal) okModal.addEventListener("click", closeModalFn);
-if (modal) {
-  modal.addEventListener("click", (e) => {
-    if (e.target === modal) closeModalFn();
-  });
+  if (pw.length >= 6) score++;
+  if (pw.length >= 10) score++;
+
+  if (/[a-z]/.test(pw)) score++;
+  if (/[A-Z]/.test(pw)) score++;
+  if (/[0-9]/.test(pw)) score++;
+  if (/[^A-Za-z0-9]/.test(pw)) score++;
+
+  if (/^(.)\1+$/.test(pw)) score = Math.max(0, score - 2);
+
+  const pct = Math.min(100, Math.round((score / 6) * 100));
+
+  let label = "Çok zayıf";
+  if (score >= 5) label = "Çok güçlü";
+  else if (score >= 4) label = "Güçlü";
+  else if (score >= 3) label = "Orta";
+  else if (score >= 2) label = "Zayıf";
+
+  return { label, pct };
 }
-document.addEventListener("keydown", (e) => {
-  if (e.key === "Escape") closeModalFn();
-});
+function updateStrengthUI(pw) {
+  if (!strengthBar || !strengthText) return;
+  const { label, pct } = calcStrength(pw);
+  strengthBar.style.width = pct + "%";
+  strengthText.textContent = `Şifre gücü: ${pw ? label : "—"}`;
+}
+if (regPasswordInput) {
+  updateStrengthUI(regPasswordInput.value);
+  regPasswordInput.addEventListener("input", () => updateStrengthUI(regPasswordInput.value));
+}
 
 // ---- auto redirect (SAFE) ----
-// Debug için: ?noredirect=1 ekleyince yönlendirme yapmaz
 (() => {
   if (location.search.includes("noredirect=1")) return;
 
@@ -155,7 +194,9 @@ document.addEventListener("keydown", (e) => {
   }
 })();
 
-// ---- LOGIN ----
+// ==========================
+// LOGIN
+// ==========================
 loginForm?.addEventListener("submit", async (e) => {
   e.preventDefault();
   if (busy) return;
@@ -165,13 +206,10 @@ loginForm?.addEventListener("submit", async (e) => {
   setLoading(loginSubmit, true);
 
   try {
-    // id üzerinden oku (HTML name uyuşmazsa bile çalışır)
     const email = normalizeEmail(v("loginEmail"));
     const password = vRaw("loginPassword");
 
-    if (!email || !password) {
-      throw new Error("E-posta ve şifre zorunlu.");
-    }
+    if (!email || !password) throw new Error("E-posta ve şifre zorunlu.");
 
     const res = await fetch(`/api/auth/login`, {
       method: "POST",
@@ -186,7 +224,6 @@ loginForm?.addEventListener("submit", async (e) => {
       throw new Error(data.message || `Giriş başarısız (HTTP ${res.status})`);
     }
 
-    // rememberMe varsa tokenı farklı yerde saklamak istersen buradan yönetebilirsin
     localStorage.setItem("token", data.token);
     localStorage.setItem("role", ROLE);
     localStorage.setItem("user", JSON.stringify(data.user || {}));
@@ -202,12 +239,20 @@ loginForm?.addEventListener("submit", async (e) => {
   }
 });
 
-// ---- REGISTER ----
+// ==========================
+// REGISTER
+// ==========================
 registerForm?.addEventListener("submit", async (e) => {
   e.preventDefault();
   if (busy) return;
 
   clearAlert(regAlert);
+
+  if (terms && !terms.checked) {
+    setAlert(regAlert, "err", "Devam etmek için şartları kabul etmelisin.");
+    return;
+  }
+
   busy = true;
   setLoading(regSubmit, true);
 
@@ -247,42 +292,3 @@ registerForm?.addEventListener("submit", async (e) => {
   }
 });
 
-// ==========================
-// Şifre gücü barı (UI)
-// ==========================
-function calcStrength(pw) {
-  let score = 0;
-  if (!pw) return { label: "—", pct: 0 };
-
-  if (pw.length >= 6) score++;
-  if (pw.length >= 10) score++;
-
-  if (/[a-z]/.test(pw)) score++;
-  if (/[A-Z]/.test(pw)) score++;
-  if (/[0-9]/.test(pw)) score++;
-  if (/[^A-Za-z0-9]/.test(pw)) score++;
-
-  if (/^(.)\1+$/.test(pw)) score = Math.max(0, score - 2);
-
-  const pct = Math.min(100, Math.round((score / 6) * 100));
-
-  let label = "Çok zayıf";
-  if (score >= 5) label = "Çok güçlü";
-  else if (score >= 4) label = "Güçlü";
-  else if (score >= 3) label = "Orta";
-  else if (score >= 2) label = "Zayıf";
-
-  return { label, pct };
-}
-
-function updateStrengthUI(pw) {
-  if (!strengthBar || !strengthText) return;
-  const { label, pct } = calcStrength(pw);
-  strengthBar.style.width = pct + "%";
-  strengthText.textContent = `Şifre gücü: ${pw ? label : "—"}`;
-}
-
-if (regPasswordInput) {
-  updateStrengthUI(regPasswordInput.value);
-  regPasswordInput.addEventListener("input", () => updateStrengthUI(regPasswordInput.value));
-}

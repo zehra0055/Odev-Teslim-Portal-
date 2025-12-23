@@ -2,11 +2,13 @@
 console.count("PAGE JS INIT");
 
 // ==========================
-//  Öğretmen Auth (BACKEND API)
+//  Öğretmen Auth + Password Reset (OTP)
 //  - POST /api/auth/register
 //  - POST /api/auth/login
-//  - fetch hatası fix: relative URL kullanır
-//  - input name/id uyuşmazlığı fix: id ile okur
+//  - POST /api/auth/forgot
+//  - POST /api/auth/reset/verify
+//  - POST /api/auth/reset
+//  - relative URL kullanır (fetch hatası olmaz)
 // ==========================
 
 const ROLE = "teacher";
@@ -25,13 +27,34 @@ const regSubmit = document.getElementById("regSubmit");
 const modal = document.getElementById("modal");
 const forgotBtn = document.getElementById("forgotBtn");
 const closeModal = document.getElementById("closeModal");
-const okModal = document.getElementById("okModal");
 
 // strength UI
 const strengthBar = document.getElementById("strengthBar");
 const strengthText = document.getElementById("strengthText");
 const regPasswordInput = document.getElementById("regPassword");
 const terms = document.getElementById("terms");
+
+// ===== Forgot/Reset Modal DOM (3 STEP) =====
+const forgotForm = document.getElementById("forgotForm");
+const forgotEmail = document.getElementById("forgotEmail");
+const forgotMsg = document.getElementById("forgotMsg");
+const forgotSubmit = document.getElementById("forgotSubmit");
+const forgotAlert = document.getElementById("forgotAlert");
+
+const codeForm = document.getElementById("codeForm");
+const resetCode = document.getElementById("resetCode");
+const codeMsg = document.getElementById("codeMsg");
+const codeSubmit = document.getElementById("codeSubmit");
+const codeAlert = document.getElementById("codeAlert");
+const resendCodeBtn = document.getElementById("resendCodeBtn");
+
+const resetForm = document.getElementById("resetForm");
+const newPassword = document.getElementById("newPassword");
+const resetMsg = document.getElementById("resetMsg");
+const resetSubmit = document.getElementById("resetSubmit");
+const resetAlert = document.getElementById("resetAlert");
+
+const backToLoginBtn = document.getElementById("backToLoginBtn");
 
 let busy = false;
 
@@ -72,6 +95,24 @@ function setTab(name) {
   clearAlert(regAlert);
 }
 
+function v(id) {
+  return (document.getElementById(id)?.value || "").trim();
+}
+function vRaw(id) {
+  return (document.getElementById(id)?.value || "");
+}
+function normalizeEmail(s) {
+  return String(s || "").trim().toLowerCase();
+}
+async function safeJson(res) {
+  try { return await res.json(); }
+  catch { return {}; }
+}
+function setInlineMsg(el, text) {
+  if (!el) return;
+  el.textContent = text || "";
+}
+
 // ---- UI EVENTS (TAB / JUMP) ----
 document.addEventListener("click", (e) => {
   const tabBtn = e.target.closest(".tab");
@@ -93,31 +134,11 @@ document.addEventListener("click", (e) => {
   const isHidden = input.type === "password";
   input.type = isHidden ? "text" : "password";
 
+  // ikon değiştir (👁️ <-> 🙈)
   btn.textContent = isHidden ? "👁️" : "🙈";
-  btn.setAttribute("aria-label", isHidden ? "Şifreyi gizle" : "Şifreyi göster");
-});
 
-// ---- forgot modal (demo) ----
-function openModal() {
-  if (!modal) return;
-  modal.setAttribute("aria-hidden", "false");
-  modal.classList.add("open");
-}
-function closeModalFn() {
-  if (!modal) return;
-  modal.setAttribute("aria-hidden", "true");
-  modal.classList.remove("open");
-}
-if (forgotBtn) forgotBtn.addEventListener("click", openModal);
-if (closeModal) closeModal.addEventListener("click", closeModalFn);
-if (okModal) okModal.addEventListener("click", closeModalFn);
-if (modal) {
-  modal.addEventListener("click", (e) => {
-    if (e.target === modal) closeModalFn();
-  });
-}
-document.addEventListener("keydown", (e) => {
-  if (e.key === "Escape") closeModalFn();
+  // aria-label güncelle
+  btn.setAttribute("aria-label", isHidden ? "Şifreyi gizle" : "Şifreyi göster");
 });
 
 // ---- password strength ----
@@ -174,18 +195,9 @@ if (regPasswordInput) {
   }
 })();
 
-// ---- helpers for inputs ----
-function v(id) {
-  return (document.getElementById(id)?.value || "").trim();
-}
-function vRaw(id) {
-  return (document.getElementById(id)?.value || "");
-}
-function normalizeEmail(s) {
-  return String(s || "").trim().toLowerCase();
-}
-
-// ---- LOGIN ----
+// ==========================
+// LOGIN
+// ==========================
 loginForm?.addEventListener("submit", async (e) => {
   e.preventDefault();
   if (busy) return;
@@ -208,7 +220,7 @@ loginForm?.addEventListener("submit", async (e) => {
       body: JSON.stringify({ role: ROLE, email, password }),
     });
 
-    const data = await res.json().catch(() => ({}));
+    const data = await safeJson(res);
     console.log("LOGIN RES:", res.status, data);
 
     if (!res.ok || !data.ok) {
@@ -229,14 +241,15 @@ loginForm?.addEventListener("submit", async (e) => {
   }
 });
 
-// ---- REGISTER ----
+// ==========================
+// REGISTER
+// ==========================
 registerForm?.addEventListener("submit", async (e) => {
   e.preventDefault();
   if (busy) return;
 
   clearAlert(regAlert);
 
-  // Şartlar tiklenmediyse kayıt olmasın (istersen kaldırabilirsin)
   if (terms && !terms.checked) {
     setAlert(regAlert, "err", "Devam etmek için şartları kabul etmelisin.");
     return;
@@ -263,7 +276,7 @@ registerForm?.addEventListener("submit", async (e) => {
       body: JSON.stringify({ role: ROLE, name, email, password }),
     });
 
-    const data = await res.json().catch(() => ({}));
+    const data = await safeJson(res);
     console.log("REGISTER RES:", res.status, data);
 
     if (!res.ok || !data.ok) {
@@ -280,3 +293,6 @@ registerForm?.addEventListener("submit", async (e) => {
     setLoading(regSubmit, false);
   }
 });
+
+
+
