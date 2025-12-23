@@ -2,15 +2,15 @@
 "use strict";
 
 /**
- * ✅ ÖĞRENCİ PANEL (FULL BACKEND + UPLOAD)
+ * ✅ ÖĞRENCİ PANEL (FULL BACKEND + GRIDFS UPLOAD)
  * - Auth: localStorage -> token, role, user
  * - Classes: API
  * - Assignments: API
- * - Submissions: API + Upload (pdf/zip)
+ * - Submissions: API + Upload (pdf/zip/docx)
  *
- * ✅ Server uyumu:
- * - POST /api/submissions/create  (multipart/form-data)
- * - uploads static: /uploads/...
+ * ✅ Server uyumu (GridFS):
+ * - POST /api/submissions/upload  (multipart/form-data)
+ * - GET  /api/files/:fileId       (download)
  */
 
 const API_BASE = "";
@@ -25,20 +25,26 @@ if (!token || role !== "student" || !me) {
   window.location.replace("/Ogrenci/ogrenci-giris.html");
 }
 
-// ========= apiFetch (FormData safe) =========
+// ========= apiFetch (FormData safe + good error) =========
 async function apiFetch(path, options = {}) {
   const headers = { ...(options.headers || {}) };
-  const isFormData = options.body instanceof FormData;
+  const isFormData = (typeof FormData !== "undefined") && (options.body instanceof FormData);
 
   // FormData'da Content-Type set etmiyoruz
   if (!isFormData && !headers["Content-Type"]) headers["Content-Type"] = "application/json";
   if (token) headers["Authorization"] = `Bearer ${token}`;
 
   const res = await fetch(API_BASE + path, { ...options, headers });
-  let data = null;
-  try { data = await res.json(); } catch {}
 
-  if (!res.ok) throw new Error(data?.message || `İstek başarısız: ${res.status}`);
+  // JSON olmayan response'lara karşı güvenli parse
+  const text = await res.text();
+  let data = null;
+  try { data = text ? JSON.parse(text) : null; } catch { data = null; }
+
+  if (!res.ok || (data && data.ok === false)) {
+    throw new Error((data && data.message) ? data.message : `İstek başarısız: ${res.status}`);
+  }
+
   return data;
 }
 
@@ -103,7 +109,7 @@ const emptyAssignments = document.getElementById("emptyAssignments");
 const assignmentSelect = document.getElementById("assignmentSelect");
 const emptyAssignSelect = document.getElementById("emptyAssignSelect");
 const submitForm = document.getElementById("submitForm");
-const fileInput = document.getElementById("fileInput"); // ✅ <input type="file" id="fileInput" ...>
+const fileInput = document.getElementById("fileInput");
 const studentNote = document.getElementById("studentNote");
 const submitAlert = document.getElementById("submitAlert");
 
@@ -155,13 +161,11 @@ async function fetchMyClasses(){
   return Array.isArray(data?.classes) ? data.classes : [];
 }
 
-// ⚠️ Endpoint adın farklıysa sadece burayı değiştir
 async function fetchAssignments(classId){
   const data = await apiFetch(`/api/assignments/by-class?classId=${encodeURIComponent(classId)}`);
   return Array.isArray(data?.assignments) ? data.assignments : [];
 }
 
-// ⚠️ Endpoint adın farklıysa sadece burayı değiştir
 async function fetchMySubmissions(classId){
   const data = await apiFetch(`/api/student/submissions?classId=${encodeURIComponent(classId)}`);
   return Array.isArray(data?.submissions) ? data.submissions : [];
@@ -289,7 +293,7 @@ function renderMyLastSubs(){
   emptyMyLast.hidden = true;
 
   subs.forEach(s => {
-    const shownName = s.file?.originalName || s.fileName || "Dosya";
+    const shownName = s.originalFileName || s.fileName || "Dosya";
     const el = document.createElement("div");
     el.className = "rowcard";
     el.innerHTML = `
@@ -402,7 +406,7 @@ function renderHistory(){
   emptyHistory.hidden = true;
 
   subs.forEach(s => {
-    const shownName = s.file?.originalName || s.fileName || "Dosya";
+    const shownName = s.originalFileName || s.fileName || "Dosya";
     const el = document.createElement("div");
     el.className = "rowcard";
     el.innerHTML = `
@@ -440,13 +444,13 @@ function selectHistorySubmission(id){
     dStatus.className = s.status === "graded" ? "pill ok" : "pill warn";
   }
 
-  // ✅ server.js uyumlu: submission.file.url
+  // ✅ GridFS: fileUrl + originalFileName
   if (dFile) {
-    if (s.file?.url) {
-      const text = s.file.originalName || "Dosyayı aç";
-      dFile.innerHTML = `<a href="${s.file.url}" target="_blank" rel="noopener">${text}</a>`;
+    if (s.fileUrl) {
+      const text = s.originalFileName || "Dosyayı indir";
+      dFile.innerHTML = `<a href="${s.fileUrl}" target="_blank" rel="noopener">${text}</a>`;
     } else {
-      dFile.textContent = s.fileName || "—";
+      dFile.textContent = s.originalFileName || s.fileName || "—";
     }
   }
 
@@ -550,7 +554,7 @@ function renderFoundClasses(classes){
   });
 }
 
-// ========= submit upload (SERVER.JS UYUMLU) =========
+// ========= submit upload (GRIDFS) =========
 async function submitAssignment(){
   clearAlert(submitAlert);
   if (!requireActiveClass()) return;
@@ -565,25 +569,27 @@ async function submitAssignment(){
   if (prev) return setAlert(submitAlert, "err", "Bu ödeve zaten teslim yaptın. (Tekrar teslim kapalı)");
 
   const file = fileInput?.files?.[0];
-  if (!file) return setAlert(submitAlert, "err", "Dosya seçmelisin (PDF/ZIP).");
+  if (!file) return setAlert(submitAlert, "err", "Dosya seçmelisin (PDF/DOCX/ZIP).");
 
   const ext = (file.name.split(".").pop() || "").toLowerCase();
-  if (!["pdf", "zip"].includes(ext)) return setAlert(submitAlert, "err", "Sadece PDF veya ZIP yükleyebilirsin.");
+  if (!["pdf", "zip", "docx"].includes(ext)) {
+    return setAlert(submitAlert, "err", "Sadece PDF / DOCX / ZIP yükleyebilirsin.");
+  }
 
   const fd = new FormData();
   fd.append("file", file);
 
-  // ✅ server beklediği alanlar:
+  // server beklediği alanlar
   fd.append("classId", activeClassId);
   fd.append("assignmentId", a.id);
   fd.append("teacherId", a.teacherId);
-  fd.append("studentId", me.id);
   fd.append("studentName", me.name || "Öğrenci");
+  fd.append("course", a.course || "");
+  fd.append("title", a.title || "");
   fd.append("studentNote", (studentNote?.value || "").trim());
 
   try {
-    // ✅ server.js route: /api/submissions/create
-    await apiFetch("/api/submissions/create", { method: "POST", body: fd });
+    await apiFetch("/api/submissions/upload", { method: "POST", body: fd });
 
     setAlert(submitAlert, "ok", "Teslim edildi! ✅");
 
