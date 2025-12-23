@@ -10,6 +10,8 @@ const nodemailer = require("nodemailer");
 const multer = require("multer");
 const { MongoClient, GridFSBucket, ObjectId } = require("mongodb");
 
+
+
 console.log("SERVER.JS LOADED ✅", __filename);
 
 const app = express();
@@ -148,31 +150,37 @@ const upload = multer({
 // FILE DOWNLOAD (GridFS)
 // GET /api/files/:id
 // ============================
-app.get("/api/files/:id", async (req, res) => {
-  try {
-    if (!gfsBucket) return res.status(500).send("Bucket hazır değil.");
+const idStr = String(req.params.id || "").trim();
+if (!ObjectId.isValid(idStr)) {
+  return res.status(400).send("Geçersiz dosya id.");
+}
 
-    const id = String(req.params.id || "").trim();
-    if (!ObjectId.isValid(id)) return res.status(400).send("Geçersiz dosya id.");
+const _id = new ObjectId(idStr);
 
-    const _id = new ObjectId(id);
+// metadata (tek kayıt)
+const file = await db.collection("uploads.files").findOne({ _id });
+if (!file) {
+  return res.status(404).send("Dosya bulunamadı.");
+}
 
-    // file metadata
-    const files = await db.collection("uploads.files").find({ _id }).toArray();
-    if (!files || !files.length) return res.status(404).send("Dosya bulunamadı.");
+res.setHeader(
+  "Content-Type",
+  file.contentType || "application/octet-stream"
+);
+res.setHeader(
+  "Content-Disposition",
+  `inline; filename="${file.filename || "file"}"`
+);
 
-    const file = files[0];
-    res.setHeader("Content-Type", file.contentType || "application/octet-stream");
-    res.setHeader("Content-Disposition", `inline; filename="${encodeURIComponent(file.filename || "file")}"`);
+// GridFS stream
+gfsBucket
+  .openDownloadStream(_id)
+  .on("error", (err) => {
+    console.error("DOWNLOAD STREAM ERROR:", err);
+    res.status(404).end();
+  })
+  .pipe(res);
 
-    const stream = gfsBucket.openDownloadStream(_id);
-    stream.on("error", () => res.status(404).end());
-    stream.pipe(res);
-  } catch (err) {
-    console.error("FILE DOWNLOAD ERROR:", err);
-    res.status(500).send("Sunucu hatası.");
-  }
-});
 
 // ============================
 // AUTH

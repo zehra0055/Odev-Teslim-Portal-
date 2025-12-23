@@ -554,8 +554,7 @@ function renderFoundClasses(classes){
   });
 }
 
-// ========= submit upload (GRIDFS) =========
-async function submitAssignment(){
+async function submitAssignment() {
   clearAlert(submitAlert);
   if (!requireActiveClass()) return;
 
@@ -565,21 +564,17 @@ async function submitAssignment(){
   const a = assignmentsCache.find(x => x.id === aId);
   if (!a) return setAlert(submitAlert, "err", "Ödev bulunamadı.");
 
-  const prev = mySubmissionsCache.find(s => s.assignmentId === aId);
-  if (prev) return setAlert(submitAlert, "err", "Bu ödeve zaten teslim yaptın. (Tekrar teslim kapalı)");
+  // 🔴 İŞTE BU SATIR YOKTU → EKLİYORSUN
+  const file = fileInput.files[0];
 
-  const file = fileInput?.files?.[0];
-  if (!file) return setAlert(submitAlert, "err", "Dosya seçmelisin (PDF/DOCX/ZIP).");
-
-  const ext = (file.name.split(".").pop() || "").toLowerCase();
-  if (!["pdf", "zip", "docx"].includes(ext)) {
-    return setAlert(submitAlert, "err", "Sadece PDF / DOCX / ZIP yükleyebilirsin.");
+  if (!file) {
+    return setAlert(submitAlert, "err", "Dosya seçmelisin (PDF/ZIP).");
   }
 
   const fd = new FormData();
   fd.append("file", file);
 
-  // server beklediği alanlar
+  // server’ın beklediği alanlar
   fd.append("classId", activeClassId);
   fd.append("assignmentId", a.id);
   fd.append("teacherId", a.teacherId);
@@ -587,20 +582,56 @@ async function submitAssignment(){
   fd.append("course", a.course || "");
   fd.append("title", a.title || "");
   fd.append("studentNote", (studentNote?.value || "").trim());
-
+  
   try {
-    await apiFetch("/api/submissions/upload", { method: "POST", body: fd });
+    await fetch("/health");buradaconst msg = data?.message || `İstek başarısız: ${res.status}`;
 
-    setAlert(submitAlert, "ok", "Teslim edildi! ✅");
-
-    if (fileInput) fileInput.value = "";
-    if (studentNote) studentNote.value = "";
-
-    await refreshAll();
-  } catch (err) {
-    setAlert(submitAlert, "err", err.message || "Teslim başarısız.");
+  } catch (e) {
+    // uyku halindeyken 503 gelirse sorun etmiyoruz
   }
+  
+  await new Promise(r => setTimeout(r, 2500)); // ⬅️ 1.5s → 2.5s
+  
+  
+  
+  async function apiFetch(path, options = {}) {
+    const headers = { ...(options.headers || {}) };
+    const isFormData = options.body instanceof FormData;
+  
+    if (!isFormData && !headers["Content-Type"]) headers["Content-Type"] = "application/json";
+    if (token) headers["Authorization"] = `Bearer ${token}`;
+  
+    let res;
+    try {
+      res = await fetch(API_BASE + path, { ...options, headers });
+    } catch (err) {
+      // ✅ Render uyku / ağ kopması / CORS gibi durumlar burada yakalanır
+      throw new Error(
+        "Sunucuya ulaşılamadı (Render uyku olabilir). 2-3 saniye bekleyip tekrar deneyin."
+      );
+    }
+  
+    let data = null;
+    try { data = await res.json(); } catch {}
+  
+    if (!res.ok) {
+      const msg =
+  (data && typeof data === "object" && data.message)
+    ? data.message
+    : `İstek başarısız: ${res.status}`;
+
+      // 503 ise direkt uyku mesajı
+      if (res.status === 503) {
+        throw new Error("Sunucu şu an uykuda (Render Free). 5 sn bekle, tekrar dene.");
+      }
+      throw new Error(msg);
+    }
+  
+    return data;
+  }
+  
 }
+
 
 // ========= refresh =========
 async function refreshAll(){
