@@ -4,18 +4,20 @@ require("dotenv").config();
 const express = require("express");
 const cors = require("cors");
 const path = require("path");
-
-const { MongoClient, GridFSBucket, ObjectId } = require("mongodb");
-const bcrypt = require("bcrypt");
 const crypto = require("crypto");
+const bcrypt = require("bcrypt");
 const nodemailer = require("nodemailer");
 const multer = require("multer");
+const { MongoClient, GridFSBucket, ObjectId } = require("mongodb");
 
 console.log("SERVER.JS LOADED ✅", __filename);
 
 const app = express();
 const PORT = process.env.PORT || 3000;
 
+// ============================
+// ENV
+// ============================
 const MONGODB_URI = process.env.MONGODB_URI;
 const DB_NAME = process.env.MONGODB_DB || "odevteslimportal";
 
@@ -23,53 +25,32 @@ if (!MONGODB_URI) {
   console.error("❌ MONGODB_URI yok! .env / Render Environment'a ekle.");
 }
 
-// ===== MIDDLEWARE =====
+// ============================
+// MIDDLEWARE
+// ============================
 app.use(cors());
 app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
 
-// ===== STATIC =====
+// Static
 app.use(express.static(path.join(__dirname, "..", "public")));
 
-// ===== HEALTH =====
+// Health
 app.get("/health", (req, res) => {
   res.json({ ok: true, time: new Date().toISOString() });
 });
 
 // ============================
-// MongoDB bağlantısı
+// MongoDB
 // ============================
 const client = new MongoClient(MONGODB_URI);
+let db = null;
+let gfsBucket = null;
 
-let db;
-let gfsBucket;
-
-// collections helper
 const col = (name) => db.collection(name);
 
 // ============================
-// Multer (RAM) + FileFilter (PDF/DOCX/ZIP)
-// ============================
-const upload = multer({
-  storage: multer.memoryStorage(),
-  limits: { fileSize: 25 * 1024 * 1024 }, // 25MB
-  fileFilter: (req, file, cb) => {
-    const allowed = [
-      "application/pdf",
-      "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
-      "application/zip",
-      "application/x-zip-compressed",
-      "application/octet-stream", // bazı zip/indirilen dosyalar böyle gelebiliyor
-    ];
-    if (!allowed.includes(file.mimetype)) {
-      return cb(new Error("Sadece PDF / DOCX / ZIP yükleyebilirsin."), false);
-    }
-    cb(null, true);
-  },
-});
-
-// ============================
-// Helpers
+// HELPERS
 // ============================
 function normEmail(v) {
   return String(v || "").trim().toLowerCase();
@@ -97,10 +78,9 @@ function isBcryptHash(s) {
 }
 
 // ============================
-// Simple token store (demo)
-// PROD’da JWT yapılır ama şimdilik yeterli
+// SESSIONS (RAM)  token -> { userId, role, exp }
 // ============================
-const sessions = new Map(); // token -> { userId, role, exp }
+const sessions = new Map();
 const SESSION_TTL_HOURS = Number(process.env.SESSION_TTL_HOURS || 24);
 
 function authRequired(req, res, next) {
@@ -116,13 +96,13 @@ function authRequired(req, res, next) {
     return res.status(401).json({ ok: false, message: "Token süresi dolmuş." });
   }
 
-  req.auth = s; // {userId, role}
+  req.auth = s; // { userId, role }
   req.token = token;
   next();
 }
 
 // ============================
-// Mail transporter (OTP reset için)
+// MAIL (OTP reset)
 // ============================
 const SMTP_HOST = process.env.SMTP_HOST;
 const SMTP_PORT = Number(process.env.SMTP_PORT || 587);
@@ -143,6 +123,56 @@ const transporter = mailEnabled
 
 const RESET_CODE_TTL_MIN = Number(process.env.RESET_CODE_TTL_MIN || 10);
 const RESET_TOKEN_TTL_MIN = Number(process.env.RESET_TOKEN_TTL_MIN || 15);
+
+// ============================
+// MULTER (memory)  -> GridFS
+// ============================
+const upload = multer({
+  storage: multer.memoryStorage(),
+  limits: { fileSize: 25 * 1024 * 1024 }, // 25MB
+  fileFilter: (req, file, cb) => {
+    const allowed = [
+      "application/pdf",
+      "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+      "application/zip",
+      "application/x-zip-compressed",
+    ];
+    if (!allowed.includes(file.mimetype)) {
+      return cb(new Error("Sadece PDF / DOCX / ZIP yükleyebilirsin"), false);
+    }
+    cb(null, true);
+  },
+});
+
+// ============================
+// FILE DOWNLOAD (GridFS)
+// GET /api/files/:id
+// ============================
+app.get("/api/files/:id", async (req, res) => {
+  try {
+    if (!gfsBucket) return res.status(500).send("Bucket hazır değil.");
+
+    const id = String(req.params.id || "").trim();
+    if (!ObjectId.isValid(id)) return res.status(400).send("Geçersiz dosya id.");
+
+    const _id = new ObjectId(id);
+
+    // file metadata
+    const files = await db.collection("uploads.files").find({ _id }).toArray();
+    if (!files || !files.length) return res.status(404).send("Dosya bulunamadı.");
+
+    const file = files[0];
+    res.setHeader("Content-Type", file.contentType || "application/octet-stream");
+    res.setHeader("Content-Disposition", `inline; filename="${encodeURIComponent(file.filename || "file")}"`);
+
+    const stream = gfsBucket.openDownloadStream(_id);
+    stream.on("error", () => res.status(404).end());
+    stream.pipe(res);
+  } catch (err) {
+    console.error("FILE DOWNLOAD ERROR:", err);
+    res.status(500).send("Sunucu hatası.");
+  }
+});
 
 // ============================
 // AUTH
@@ -185,7 +215,6 @@ app.post("/api/auth/register", async (req, res) => {
 
     const stored = existing.password || "";
     const okPass = isBcryptHash(stored) ? await bcrypt.compare(pass, stored) : String(stored) === pass;
-
     if (!okPass) {
       return res.status(409).json({ ok: false, message: "Bu e-posta zaten kayıtlı. Şifre yanlışsa rol eklenemez." });
     }
@@ -261,7 +290,6 @@ app.post("/api/auth/login", async (req, res) => {
   }
 });
 
-// LOGOUT
 app.post("/api/auth/logout", authRequired, async (req, res) => {
   try {
     if (req.token) sessions.delete(req.token);
@@ -271,7 +299,7 @@ app.post("/api/auth/logout", authRequired, async (req, res) => {
   }
 });
 
-// ====== FORGOT ======
+// FORGOT
 app.post("/api/auth/forgot", async (req, res) => {
   try {
     const { role, email } = req.body || {};
@@ -323,7 +351,7 @@ app.post("/api/auth/forgot", async (req, res) => {
   }
 });
 
-// ====== VERIFY ======
+// VERIFY
 app.post("/api/auth/reset/verify", async (req, res) => {
   try {
     const { role, email, code } = req.body || {};
@@ -369,7 +397,7 @@ app.post("/api/auth/reset/verify", async (req, res) => {
   }
 });
 
-// ====== RESET ======
+// RESET
 app.post("/api/auth/reset", async (req, res) => {
   try {
     const { role, email, resetToken, newPassword } = req.body || {};
@@ -420,10 +448,10 @@ app.post("/api/auth/reset", async (req, res) => {
 });
 
 // ============================
-// CLASSES + JOIN
+// CLASSES
 // ============================
 
-// Teacher: sınıf oluştur
+// Teacher: create class
 app.post("/api/classes/create", authRequired, async (req, res) => {
   try {
     if (req.auth.role !== "teacher") return res.status(403).json({ ok: false, message: "Sadece öğretmen." });
@@ -434,7 +462,6 @@ app.post("/api/classes/create", authRequired, async (req, res) => {
 
     const classes = col("classes");
 
-    // 6 haneli kod benzersiz
     let code = "";
     for (let i = 0; i < 15; i++) {
       code = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789"
@@ -463,11 +490,10 @@ app.post("/api/classes/create", authRequired, async (req, res) => {
   }
 });
 
-// Teacher: kendi sınıfları
+// Teacher: mine
 app.get("/api/classes/mine", authRequired, async (req, res) => {
   try {
     if (req.auth.role !== "teacher") return res.status(403).json({ ok: false, message: "Sadece öğretmen." });
-
     const teacherId = String(req.query.teacherId || "").trim() || req.auth.userId;
     if (teacherId !== req.auth.userId) return res.status(403).json({ ok: false, message: "Yetkisiz." });
 
@@ -483,7 +509,7 @@ app.get("/api/classes/mine", authRequired, async (req, res) => {
   }
 });
 
-// Code ile sınıf bul
+// Search by code
 app.get("/api/classes/search", async (req, res) => {
   try {
     const code = String(req.query.code || "").trim().toUpperCase();
@@ -500,7 +526,7 @@ app.get("/api/classes/search", async (req, res) => {
   }
 });
 
-// Öğretmen adına göre sınıf ara
+// Search by teacher name
 app.get("/api/classes/search-by-teacher", async (req, res) => {
   try {
     const q = String(req.query.teacher || "").trim().toLowerCase();
@@ -529,7 +555,7 @@ app.get("/api/classes/search-by-teacher", async (req, res) => {
   }
 });
 
-// Sınıfa katıl (student)
+// Join (student)
 app.post("/api/classes/join", authRequired, async (req, res) => {
   try {
     if (req.auth.role !== "student") return res.status(403).json({ ok: false, message: "Sadece öğrenci katılabilir." });
@@ -560,11 +586,13 @@ app.post("/api/classes/join", authRequired, async (req, res) => {
   }
 });
 
-// Öğrencinin katıldığı sınıflar
-app.get("/api/classes/my", async (req, res) => {
+// My classes (student)  ✅ authRequired yaptım (daha güvenli)
+app.get("/api/classes/my", authRequired, async (req, res) => {
   try {
-    const studentId = String(req.query.studentId || "").trim();
-    if (!studentId) return res.json({ ok: true, classes: [] });
+    if (req.auth.role !== "student") return res.status(403).json({ ok: false, message: "Sadece öğrenci." });
+
+    const studentId = String(req.query.studentId || "").trim() || req.auth.userId;
+    if (studentId !== req.auth.userId) return res.status(403).json({ ok: false, message: "Yetkisiz." });
 
     const mems = await col("class_members")
       .find({ studentId }, { projection: { _id: 0, classId: 1 } })
@@ -585,10 +613,8 @@ app.get("/api/classes/my", async (req, res) => {
 });
 
 // ============================
-// ASSIGNMENTS (API)
+// ASSIGNMENTS
 // ============================
-
-// Teacher: create assignment
 app.post("/api/assignments/create", authRequired, async (req, res) => {
   try {
     if (req.auth.role !== "teacher") return res.status(403).json({ ok: false, message: "Sadece öğretmen." });
@@ -619,11 +645,22 @@ app.post("/api/assignments/create", authRequired, async (req, res) => {
   }
 });
 
-// Student/Teacher: get assignments by class
 app.get("/api/assignments/by-class", authRequired, async (req, res) => {
   try {
     const classId = String(req.query.classId || "").trim();
     if (!classId) return res.json({ ok: true, assignments: [] });
+
+    // öğrenci bu sınıfta mı / öğretmen kendi sınıfı mı kontrolü (basic)
+    const cls = await col("classes").findOne({ id: classId }, { projection: { _id: 0 } });
+    if (!cls) return res.json({ ok: true, assignments: [] });
+
+    if (req.auth.role === "teacher" && cls.teacherId !== req.auth.userId) {
+      return res.status(403).json({ ok: false, message: "Yetkisiz." });
+    }
+    if (req.auth.role === "student") {
+      const mem = await col("class_members").findOne({ classId, studentId: req.auth.userId });
+      if (!mem) return res.status(403).json({ ok: false, message: "Bu sınıfta değilsin." });
+    }
 
     const list = await col("assignments")
       .find({ classId }, { projection: { _id: 0 } })
@@ -638,94 +675,84 @@ app.get("/api/assignments/by-class", authRequired, async (req, res) => {
 });
 
 // ============================
-// SUBMISSIONS (GridFS Upload + Lists + Review)
+// SUBMISSIONS (GridFS upload)
 // ============================
 
-// Student: upload submission (GridFS)
+// Student: upload submission
 app.post("/api/submissions/upload", authRequired, upload.single("file"), async (req, res) => {
   try {
     if (req.auth.role !== "student") {
       return res.status(403).json({ ok: false, message: "Sadece öğrenci teslim edebilir." });
     }
-    if (!gfsBucket) return res.status(500).json({ ok: false, message: "GridFS hazır değil." });
+    if (!gfsBucket) return res.status(500).json({ ok: false, message: "Dosya sistemi hazır değil." });
 
     const { classId, assignmentId, teacherId, studentName, course, title, studentNote } = req.body || {};
     if (!req.file) return res.status(400).json({ ok: false, message: "Dosya zorunlu." });
-    if (!classId || !assignmentId || !teacherId) return res.status(400).json({ ok: false, message: "Eksik alan var." });
+    if (!classId || !assignmentId || !teacherId) {
+      return res.status(400).json({ ok: false, message: "Eksik alan var." });
+    }
+
+    // öğrenci sınıfta mı?
+    const mem = await col("class_members").findOne({ classId, studentId: req.auth.userId });
+    if (!mem) return res.status(403).json({ ok: false, message: "Bu sınıfta değilsin." });
 
     // tekrar teslim engeli
-    const exists = await col("submissions").findOne({
-      classId,
-      assignmentId,
-      studentId: req.auth.userId,
-    });
-    if (exists) return res.status(409).json({ ok: false, message: "Bu ödeve zaten teslim yaptın." });
+    const exists = await col("submissions").findOne({ classId, assignmentId, studentId: req.auth.userId });
+    if (exists) {
+      return res.status(409).json({ ok: false, message: "Bu ödeve zaten teslim yaptın." });
+    }
 
-    const safeOriginal = String(req.file.originalname || "dosya").replace(/[^\w.\-() ]+/g, "_");
-
-    const up = gfsBucket.openUploadStream(safeOriginal, {
+    // GridFS upload
+    const filename = `${Date.now()}_${req.file.originalname}`;
+    const uploadStream = gfsBucket.openUploadStream(filename, {
       contentType: req.file.mimetype,
-      metadata: { classId, assignmentId, teacherId, studentId: req.auth.userId },
+      metadata: {
+        originalName: req.file.originalname,
+        studentId: req.auth.userId,
+        classId,
+        assignmentId,
+      },
     });
 
-    up.end(req.file.buffer);
+    uploadStream.end(req.file.buffer);
 
-    up.on("error", (err) => {
-      console.error("GRIDFS UPLOAD ERROR:", err);
-      res.status(500).json({ ok: false, message: "Dosya yükleme hatası." });
+    uploadStream.on("error", (e) => {
+      console.error("GRIDFS UPLOAD ERROR:", e);
+      return res.status(500).json({ ok: false, message: "Dosya yüklenemedi." });
     });
 
-    up.on("finish", async (file) => {
+    uploadStream.on("finish", async (fileDoc) => {
+      const fileId = fileDoc._id.toString();
+
       const item = {
         id: makeId("sub"),
         classId,
         assignmentId,
         teacherId,
         studentId: req.auth.userId,
-        studentName: safeName(studentName) || "Öğrenci",
-        course: course || "",
-        title: title || "",
-        studentNote: studentNote || "",
+        studentName: safeName(studentName) || mem.studentName || "Öğrenci",
+        course: safeName(course) || "",
+        title: safeName(title) || "",
+        studentNote: safeName(studentNote) || "",
         submittedAt: new Date().toISOString(),
         status: "pending",
         grade: "",
         feedback: "",
 
-        fileId: file._id,
+        // file meta
+        fileId,
         originalFileName: req.file.originalname,
-        storedFileName: file.filename,
-        size: file.length,
         mimeType: req.file.mimetype,
-        fileUrl: `/api/files/${file._id}`,
+        size: req.file.size,
+        fileUrl: `/api/files/${fileId}`,
       };
 
       await col("submissions").insertOne(item);
-      res.json({ ok: true, submission: item });
+      return res.json({ ok: true, submission: item });
     });
   } catch (err) {
     console.error("UPLOAD ERROR:", err);
-    res.status(500).json({ ok: false, message: err.message || "Upload başarısız." });
-  }
-});
-
-// File download (GridFS)
-app.get("/api/files/:fileId", async (req, res) => {
-  try {
-    if (!gfsBucket) return res.status(500).send("GridFS hazır değil.");
-
-    const fileId = new ObjectId(req.params.fileId);
-
-    const files = await db.collection("submissions.files").find({ _id: fileId }).toArray();
-    if (!files.length) return res.status(404).send("Dosya bulunamadı.");
-
-    const file = files[0];
-    res.setHeader("Content-Type", file.contentType || "application/octet-stream");
-    res.setHeader("Content-Disposition", `attachment; filename="${file.filename}"`);
-
-    gfsBucket.openDownloadStream(fileId).pipe(res);
-  } catch (err) {
-    console.error("FILE DOWNLOAD ERROR:", err);
-    res.status(400).send("Geçersiz fileId.");
+    return res.status(500).json({ ok: false, message: err.message || "Upload başarısız." });
   }
 });
 
@@ -749,7 +776,7 @@ app.get("/api/teacher/submissions", authRequired, async (req, res) => {
   }
 });
 
-// Student: my submissions by class
+// Student: my submissions
 app.get("/api/student/submissions", authRequired, async (req, res) => {
   try {
     if (req.auth.role !== "student") return res.status(403).json({ ok: false, message: "Sadece öğrenci." });
@@ -769,7 +796,7 @@ app.get("/api/student/submissions", authRequired, async (req, res) => {
   }
 });
 
-// Teacher: grade/review submission
+// Teacher: review
 app.post("/api/teacher/submissions/review", authRequired, async (req, res) => {
   try {
     if (req.auth.role !== "teacher") return res.status(403).json({ ok: false, message: "Sadece öğretmen." });
@@ -792,7 +819,10 @@ app.post("/api/teacher/submissions/review", authRequired, async (req, res) => {
     const st = status === "graded" ? "graded" : "pending";
     const fb = safeName(feedback);
 
-    await col("submissions").updateOne({ id: submissionId }, { $set: { status: st, grade: gradeVal, feedback: fb } });
+    await col("submissions").updateOne(
+      { id: submissionId },
+      { $set: { status: st, grade: gradeVal, feedback: fb } }
+    );
 
     res.json({ ok: true });
   } catch (err) {
@@ -802,9 +832,7 @@ app.post("/api/teacher/submissions/review", authRequired, async (req, res) => {
 });
 
 // ===== FALLBACK =====
-app.use((req, res) => {
-  res.status(404).send("404 - Not Found");
-});
+app.use((req, res) => res.status(404).send("404 - Not Found"));
 
 // ============================
 // START
@@ -814,11 +842,9 @@ async function start() {
     console.log("🔌 MongoDB bağlanıyor...");
     await client.connect();
     db = client.db(DB_NAME);
-    app.locals.db = db;
 
-    // GridFS init
-    gfsBucket = new GridFSBucket(db, { bucketName: "submissions" });
-    console.log("✅ GridFS ready: submissions");
+    // GridFS bucket
+    gfsBucket = new GridFSBucket(db, { bucketName: "uploads" });
 
     // indexes
     await col("users").createIndex({ email: 1 }, { unique: true });
