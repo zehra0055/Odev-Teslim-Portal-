@@ -1,18 +1,9 @@
-# dependencies
 node_modules/
 Server/node_modules/
-
-# env secrets
 .env
 Server/.env
-
-# logs
 *.log
-
-# uploads (opsiyonel)
 Server/uploads/
-
-# OS/IDE
+.vscode/
 .DS_Store
 Thumbs.db
-.vscode/
