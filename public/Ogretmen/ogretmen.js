@@ -1,13 +1,19 @@
 "use strict";
 
+/**
+ * ✅ FIX: Sınıflar localStorage yerine BACKEND'de tutuluyor.
+ * Böylece öğrenci kodla arayınca sınıf görünecek.
+ *
+ * Gerekli endpointler:
+ *  - POST /api/classes/create   body: { name, desc, teacherId, teacherName }
+ *  - GET  /api/classes/mine?teacherId=...
+ *
+ * Diğer datalar (ödev/teslim/üyeler) şimdilik localStorage'da kaldı.
+ * İstersen onları da API’ye taşırız.
+ */
+
 // ========= STORAGE KEYS =========
-// NOT: Artık giriş/oturum için otp_session/otp_remember kullanmıyoruz.
-// Login sayfan: localStorage -> token, role, user yazıyor.
-// Panel bu yeni anahtarlara göre guard yapacak.
-
-const KEY_CLASSES = "otp_classes";               // {id, teacherId, name, desc, code, createdAt}
 const KEY_CLASS_MEMBERS = "otp_class_members";   // {id, classId, studentId, studentName, joinedAt}
-
 const KEY_ASSIGNMENTS = "otp_assignments";       // {id, classId, teacherId, course, title, desc, due, createdAt}
 const KEY_SUBMISSIONS = "otp_submissions";       // {id, classId, assignmentId, teacherId, studentId, studentName, course, title, fileName, submittedAt, status, grade, feedback}
 
@@ -41,13 +47,6 @@ function clearAlert(el){
   el.textContent = "";
 }
 
-function randomCode(len=6){
-  const chars = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789";
-  let out = "";
-  for (let i=0;i<len;i++) out += chars[Math.floor(Math.random()*chars.length)];
-  return out;
-}
-
 function pillForStatus(s){
   if (s === "graded") return `<span class="pill ok">Notlandırıldı</span>`;
   return `<span class="pill warn">Bekliyor</span>`;
@@ -66,6 +65,28 @@ try {
 
 if (!token || role !== "teacher" || !me) {
   window.location.replace("/Ogretmen/ogretmen-giris.html");
+}
+
+// ========= API =========
+const API_BASE = ""; // aynı origin
+async function apiFetch(path, options = {}) {
+  const headers = {
+    "Content-Type": "application/json",
+    ...(options.headers || {})
+  };
+
+  // token varsa gönder (server kontrol etmese bile sorun değil)
+  if (token) headers["Authorization"] = `Bearer ${token}`;
+
+  const res = await fetch(API_BASE + path, { ...options, headers });
+  let data = null;
+  try { data = await res.json(); } catch { /* ignore */ }
+
+  if (!res.ok) {
+    const msg = data?.message || `İstek başarısız: ${res.status}`;
+    throw new Error(msg);
+  }
+  return data;
 }
 
 // ========= DOM =========
@@ -163,30 +184,32 @@ const copyAlert = document.getElementById("copyAlert");
 let activeClassId = null;
 let selectedSubmissionId = null;
 
+// ✅ sınıfları artık API'den çekiyoruz (cache)
+let classesCache = [];
+
 // ========= DATA LAYER =========
-function getClasses(){
-  const all = load(KEY_CLASSES, []);
-  return all.filter(c => c.teacherId === me.id);
+async function getClasses(){
+  // teacher'ın sınıflarını backend'den çek
+  const data = await apiFetch(`/api/classes/mine?teacherId=${encodeURIComponent(me.id)}`);
+  const list = Array.isArray(data?.classes) ? data.classes : [];
+  return list;
 }
-function saveClasses(list){
-  const all = load(KEY_CLASSES, []);
-  const rest = all.filter(c => c.teacherId !== me.id);
-  save(KEY_CLASSES, [...list, ...rest]);
-}
+
 function getMembersByClass(classId){
   const all = load(KEY_CLASS_MEMBERS, []);
   return all.filter(m => m.classId === classId);
 }
+
 function getAssignmentsByClass(classId){
   const all = load(KEY_ASSIGNMENTS, []);
   return all.filter(a => a.classId === classId && a.teacherId === me.id);
 }
 function saveAssignments(listForTeacher){
-  // teacher bazlı overwrite
   const all = load(KEY_ASSIGNMENTS, []);
   const rest = all.filter(a => a.teacherId !== me.id);
   save(KEY_ASSIGNMENTS, [...listForTeacher, ...rest]);
 }
+
 function getSubmissionsByClass(classId){
   const all = load(KEY_SUBMISSIONS, []);
   return all.filter(s => s.classId === classId && s.teacherId === me.id);
@@ -204,7 +227,7 @@ function setView(name){
 }
 
 function setActiveClassChip(){
-  const cls = getClasses().find(c => c.id === activeClassId);
+  const cls = classesCache.find(c => c.id === activeClassId);
   const label = cls ? `Sınıf: ${cls.name}` : "Sınıf: —";
   activeClassChip.textContent = label;
   assignClassChip.textContent = label;
@@ -212,11 +235,16 @@ function setActiveClassChip(){
   studClassChip.textContent = label;
 }
 
-function fillClassSelect(){
-  const classes = getClasses().sort((a,b)=> (a.createdAt||"").localeCompare(b.createdAt||""));
+async function fillClassSelect(){
   classSelect.innerHTML = "";
+  try {
+    classesCache = (await getClasses()).sort((a,b)=> (a.createdAt||"").localeCompare(b.createdAt||""));
+  } catch (err) {
+    classesCache = [];
+    console.error(err);
+  }
 
-  if (!classes.length) {
+  if (!classesCache.length) {
     const opt = document.createElement("option");
     opt.value = "";
     opt.textContent = "Önce sınıf oluştur";
@@ -228,16 +256,15 @@ function fillClassSelect(){
   }
 
   classSelect.disabled = false;
-  classes.forEach(c => {
+  classesCache.forEach(c => {
     const opt = document.createElement("option");
     opt.value = c.id;
     opt.textContent = `${c.name} (${c.code})`;
     classSelect.appendChild(opt);
   });
 
-  // active class
-  if (!activeClassId || !classes.some(c => c.id === activeClassId)) {
-    activeClassId = classes[0].id;
+  if (!activeClassId || !classesCache.some(c => c.id === activeClassId)) {
+    activeClassId = classesCache[0].id;
   }
   classSelect.value = activeClassId;
   setActiveClassChip();
@@ -529,7 +556,7 @@ openCreateClass.addEventListener("click", () => {
   openModal(createClassModal);
 });
 
-createClassForm.addEventListener("submit", (e) => {
+createClassForm.addEventListener("submit", async (e) => {
   e.preventDefault();
   clearAlert(classCreateAlert);
 
@@ -541,43 +568,43 @@ createClassForm.addEventListener("submit", (e) => {
     return;
   }
 
-  const classes = getClasses();
+  try {
+    // ✅ backend'e kaydet (öğrenci buradan görecek)
+    const data = await apiFetch("/api/classes/create", {
+      method: "POST",
+      body: JSON.stringify({
+        name,
+        desc,
+        teacherId: me.id,
+        teacherName: me.name || "Öğretmen"
+      })
+    });
 
-  // code unique olmalı
-  let code = randomCode(6);
-  const all = load(KEY_CLASSES, []);
-  let tries = 0;
-  while (all.some(c => c.code === code) && tries < 10) {
-    code = randomCode(6);
-    tries++;
+    const newClass = data?.class;
+    if (!newClass?.id) {
+      setAlert(classCreateAlert, "err", "Sınıf oluşturuldu ama veri dönmedi.");
+      return;
+    }
+
+    setAlert(classCreateAlert, "ok", `Sınıf oluşturuldu. Kod: ${newClass.code}`);
+
+    await fillClassSelect();
+    activeClassId = newClass.id;
+    classSelect.value = activeClassId;
+    setActiveClassChip();
+
+    setTimeout(() => closeModal(createClassModal), 600);
+    refreshAll();
+  } catch (err) {
+    console.error(err);
+    setAlert(classCreateAlert, "err", err.message || "Sınıf oluşturulamadı.");
   }
-
-  const newClass = {
-    id: uid("cls"),
-    teacherId: me.id,
-    name,
-    desc,
-    code,
-    createdAt: new Date().toISOString()
-  };
-
-  saveClasses([newClass, ...classes]);
-  setAlert(classCreateAlert, "ok", `Sınıf oluşturuldu. Kod: ${newClass.code}`);
-
-  fillClassSelect();
-  activeClassId = newClass.id;
-  classSelect.value = activeClassId;
-  setActiveClassChip();
-
-  // kapat
-  setTimeout(() => closeModal(createClassModal), 600);
-  refreshAll();
 });
 
 openClassInfo.addEventListener("click", () => {
   if (!requireActiveClass()) return;
 
-  const cls = getClasses().find(c => c.id === activeClassId);
+  const cls = classesCache.find(c => c.id === activeClassId);
   if (!cls) return;
 
   infoClassName.textContent = cls.name;
@@ -602,7 +629,6 @@ copyClassCode.addEventListener("click", async () => {
 who.textContent = me?.name ? `👨‍🏫 ${me.name}` : "👨‍🏫 Öğretmen";
 
 logoutBtn.addEventListener("click", () => {
-  // NEW logout
   localStorage.removeItem("token");
   localStorage.removeItem("role");
   localStorage.removeItem("user");
@@ -680,7 +706,6 @@ assignmentForm.addEventListener("submit", (e) => {
 
 // ========= DEMO: seed teslim (istersen kaldırırız) =========
 function seedDemoIfEmpty(){
-  // seçili sınıfta teslim yoksa 1-2 demo üret
   if (!activeClassId) return;
 
   const subs = getSubmissionsByClass(activeClassId);
@@ -689,7 +714,6 @@ function seedDemoIfEmpty(){
   const as = getAssignmentsByClass(activeClassId);
   let aId = as[0]?.id;
 
-  // sınıfta hiç ödev yoksa 1 tane oluştur
   if (!aId) {
     const allTeacherAssignments = load(KEY_ASSIGNMENTS, []).filter(a => a.teacherId === me.id);
     const demoA = {
@@ -755,12 +779,16 @@ function refreshAll(){
 }
 
 // ========= BOOT =========
-fillClassSelect();
-setActiveClassChip();
-setView("dashboard");
-clearSelection();
+(async function boot(){
+  try {
+    await fillClassSelect();
+  } catch (e) {
+    console.error(e);
+  }
+  setActiveClassChip();
+  setView("dashboard");
+  clearSelection();
 
-// demo teslim üret
-seedDemoIfEmpty();
-
-refreshAll();
+  seedDemoIfEmpty();
+  refreshAll();
+})();
