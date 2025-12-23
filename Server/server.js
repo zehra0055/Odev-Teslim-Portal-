@@ -4,26 +4,24 @@ require("dotenv").config();
 const express = require("express");
 const cors = require("cors");
 const path = require("path");
+const fs = require("fs");
+
 const { MongoClient } = require("mongodb");
 const bcrypt = require("bcrypt");
 const crypto = require("crypto");
 const nodemailer = require("nodemailer");
-
+const multer = require("multer");
 
 console.log("SERVER.JS LOADED ✅", __filename);
 
 const app = express();
-
 const PORT = process.env.PORT || 3000;
 
-// ✅ Render'a koyduğun ENV
 const MONGODB_URI = process.env.MONGODB_URI;
-
-// İstersen Render ENV'e bunu da ekle: MONGODB_DB=odevteslimportal
 const DB_NAME = process.env.MONGODB_DB || "odevteslimportal";
 
 if (!MONGODB_URI) {
-  console.error("❌ MONGODB_URI env yok! Render -> Environment'a ekle.");
+  console.error("❌ MONGODB_URI yok! .env / Render Environment'a ekle.");
 }
 
 // ===== MIDDLEWARE =====
@@ -40,11 +38,17 @@ app.get("/health", (req, res) => {
 });
 
 // ============================
-// MongoDB bağlantısı (tek sefer)
+// MongoDB bağlantısı
 // ============================
 const client = new MongoClient(MONGODB_URI);
-let db, usersCol;
+let db;
 
+// collections helper
+const col = (name) => db.collection(name);
+
+// ============================
+// Helpers
+// ============================
 function normEmail(v) {
   return String(v || "").trim().toLowerCase();
 }
@@ -54,72 +58,161 @@ function safeName(v) {
 function isValidRole(role) {
   return ["student", "teacher"].includes(role);
 }
-function makeId(prefix = "u") {
+function makeId(prefix = "id") {
   return `${prefix}_${Math.random().toString(16).slice(2)}_${Date.now()}`;
 }
+function genToken() {
+  return crypto.randomBytes(24).toString("hex");
+}
+function nowPlusMinutes(min) {
+  return new Date(Date.now() + min * 60 * 1000);
+}
+function gen6DigitCode() {
+  return String(Math.floor(100000 + Math.random() * 900000));
+}
+function isBcryptHash(s) {
+  return typeof s === "string" && (s.startsWith("$2a$") || s.startsWith("$2b$") || s.startsWith("$2y$"));
+}
 
-// REGISTER (email varsa rol ekler)
+// ============================
+// Simple token store (demo)
+// PROD’da JWT yapılır ama şimdilik yeterli
+// ============================
+const sessions = new Map(); // token -> { userId, role, exp }
+const SESSION_TTL_HOURS = Number(process.env.SESSION_TTL_HOURS || 24);
+
+function authRequired(req, res, next) {
+  const h = req.headers.authorization || "";
+  const token = h.startsWith("Bearer ") ? h.slice(7) : "";
+  if (!token) return res.status(401).json({ ok: false, message: "Token yok." });
+
+  const s = sessions.get(token);
+  if (!s) return res.status(401).json({ ok: false, message: "Token geçersiz." });
+
+  if (s.exp && new Date(s.exp) < new Date()) {
+    sessions.delete(token);
+    return res.status(401).json({ ok: false, message: "Token süresi dolmuş." });
+  }
+
+  req.auth = s; // {userId, role}
+  req.token = token;
+  next();
+}
+
+// ============================
+// Mail transporter (OTP reset için)
+// ============================
+const SMTP_HOST = process.env.SMTP_HOST;
+const SMTP_PORT = Number(process.env.SMTP_PORT || 587);
+const SMTP_USER = process.env.SMTP_USER;
+const SMTP_PASS = process.env.SMTP_PASS;
+const SMTP_FROM = process.env.SMTP_FROM || SMTP_USER;
+
+const mailEnabled = SMTP_HOST && SMTP_USER && SMTP_PASS;
+
+const transporter = mailEnabled
+  ? nodemailer.createTransport({
+      host: SMTP_HOST,
+      port: SMTP_PORT,
+      secure: SMTP_PORT === 465,
+      auth: { user: SMTP_USER, pass: SMTP_PASS },
+    })
+  : null;
+
+const RESET_CODE_TTL_MIN = Number(process.env.RESET_CODE_TTL_MIN || 10);
+const RESET_TOKEN_TTL_MIN = Number(process.env.RESET_TOKEN_TTL_MIN || 15);
+
+// ============================
+// Uploads (PDF/ZIP)
+// ============================
+const uploadDir = path.join(__dirname, "..", "uploads");
+if (!fs.existsSync(uploadDir)) fs.mkdirSync(uploadDir, { recursive: true });
+app.use("/uploads", express.static(uploadDir));
+
+const storage = multer.diskStorage({
+  destination: (req, file, cb) => cb(null, uploadDir),
+  filename: (req, file, cb) => {
+    const ext = path.extname(file.originalname).toLowerCase();
+    const safeBase = path
+      .basename(file.originalname, ext)
+      .replace(/[^a-zA-Z0-9-_]+/g, "_")
+      .slice(0, 60);
+    const unique = `sub_${Date.now()}_${Math.random().toString(16).slice(2)}`;
+    cb(null, `${unique}_${safeBase}${ext}`);
+  },
+});
+
+function fileFilter(req, file, cb) {
+  const ext = path.extname(file.originalname).toLowerCase();
+  const allowed = [".pdf", ".zip"];
+  if (!allowed.includes(ext)) return cb(new Error("Sadece PDF veya ZIP yükleyebilirsin."));
+  cb(null, true);
+}
+
+const upload = multer({
+  storage,
+  fileFilter,
+  limits: { fileSize: 20 * 1024 * 1024 }, // 20MB
+});
+
+// ============================
+// AUTH
+// ============================
+
+// REGISTER
 app.post("/api/auth/register", async (req, res) => {
   try {
     const { role, name, email, password } = req.body || {};
 
-    if (!role || !email || !password) {
-      return res.status(400).json({ ok: false, message: "Eksik alan var." });
-    }
-    if (!isValidRole(role)) {
-      return res.status(400).json({ ok: false, message: "Geçersiz rol." });
-    }
+    if (!role || !email || !password) return res.status(400).json({ ok: false, message: "Eksik alan var." });
+    if (!isValidRole(role)) return res.status(400).json({ ok: false, message: "Geçersiz rol." });
 
     const mail = normEmail(email);
     const pass = String(password);
 
-    if (!mail.includes("@")) {
-      return res.status(400).json({ ok: false, message: "Geçerli bir e-posta gir." });
-    }
-    if (pass.length < 6) {
-      return res.status(400).json({ ok: false, message: "Şifre en az 6 karakter olmalı." });
-    }
+    if (!mail.includes("@")) return res.status(400).json({ ok: false, message: "Geçerli bir e-posta gir." });
+    if (pass.length < 6) return res.status(400).json({ ok: false, message: "Şifre en az 6 karakter olmalı." });
 
-    const existing = await usersCol.findOne({ email: mail });
+    const users = col("users");
+    const existing = await users.findOne({ email: mail });
 
-    // yoksa yeni kullanıcı
     if (!existing) {
+      const hash = await bcrypt.hash(pass, 10);
       const newUser = {
         id: makeId("usr"),
         name: safeName(name) || "(İsimsiz)",
         email: mail,
-        password: pass, // şimdilik düz (istersen sonra bcrypt)
+        password: hash,
         roles: [role],
         createdAt: new Date().toISOString(),
       };
 
-      await usersCol.insertOne(newUser);
-
+      await users.insertOne(newUser);
       return res.json({
         ok: true,
         user: { id: newUser.id, name: newUser.name, email: newUser.email, roles: newUser.roles },
       });
     }
 
-    // email var -> şifre kontrol
-    if (String(existing.password) !== pass) {
-      return res.status(409).json({
-        ok: false,
-        message: "Bu e-posta zaten kayıtlı. Şifre yanlışsa rol eklenemez.",
-      });
+    const stored = existing.password || "";
+    const okPass = isBcryptHash(stored) ? await bcrypt.compare(pass, stored) : String(stored) === pass;
+
+    if (!okPass) {
+      return res.status(409).json({ ok: false, message: "Bu e-posta zaten kayıtlı. Şifre yanlışsa rol eklenemez." });
     }
 
-    // rol ekle
+    if (!isBcryptHash(stored)) {
+      const hash = await bcrypt.hash(pass, 10);
+      await users.updateOne({ _id: existing._id }, { $set: { password: hash } });
+    }
+
     const roles = Array.isArray(existing.roles) ? existing.roles : [];
     if (!roles.includes(role)) roles.push(role);
 
     const incomingName = safeName(name);
     const updatedName = incomingName || existing.name || "(İsimsiz)";
 
-    await usersCol.updateOne(
-      { _id: existing._id },
-      { $set: { roles, name: updatedName } }
-    );
+    await users.updateOne({ _id: existing._id }, { $set: { roles, name: updatedName } });
 
     return res.json({
       ok: true,
@@ -136,27 +229,36 @@ app.post("/api/auth/login", async (req, res) => {
   try {
     const { role, email, password } = req.body || {};
 
-    if (!role || !email || !password) {
-      return res.status(400).json({ ok: false, message: "Eksik alan var." });
-    }
-    if (!isValidRole(role)) {
-      return res.status(400).json({ ok: false, message: "Geçersiz rol." });
-    }
+    if (!role || !email || !password) return res.status(400).json({ ok: false, message: "Eksik alan var." });
+    if (!isValidRole(role)) return res.status(400).json({ ok: false, message: "Geçersiz rol." });
 
     const mail = normEmail(email);
     const pass = String(password);
 
-    const user = await usersCol.findOne({ email: mail });
+    const users = col("users");
+    const user = await users.findOne({ email: mail });
 
-    if (!user || String(user.password) !== pass) {
-      return res.status(401).json({ ok: false, message: "E-posta/şifre hatalı." });
+    if (!user) return res.status(401).json({ ok: false, message: "E-posta/şifre hatalı." });
+
+    const stored = user.password || "";
+    const okPass = isBcryptHash(stored) ? await bcrypt.compare(pass, stored) : String(stored) === pass;
+    if (!okPass) return res.status(401).json({ ok: false, message: "E-posta/şifre hatalı." });
+
+    if (!isBcryptHash(stored)) {
+      const hash = await bcrypt.hash(pass, 10);
+      await users.updateOne({ _id: user._id }, { $set: { password: hash } });
     }
 
-    if (!user.roles?.includes(role)) {
+    if (!Array.isArray(user.roles) || !user.roles.includes(role)) {
       return res.status(403).json({ ok: false, message: "Bu hesap bu role sahip değil." });
     }
 
-    const token = "t_" + Math.random().toString(16).slice(2);
+    const token = "t_" + genToken();
+    sessions.set(token, {
+      userId: user.id,
+      role,
+      exp: nowPlusMinutes(SESSION_TTL_HOURS * 60).toISOString(),
+    });
 
     return res.json({
       ok: true,
@@ -170,161 +272,83 @@ app.post("/api/auth/login", async (req, res) => {
   }
 });
 
-// Debug (isteğe bağlı)
-app.get("/api/debug/users-count", async (req, res) => {
-  const count = await usersCol.countDocuments({});
-  res.json({ ok: true, count });
-});
-app.get("/api/debug/users", async (req, res) => {
-  const users = await usersCol
-    .find({}, { projection: { _id: 0, id: 1, email: 1, roles: 1, name: 1 } })
-    .toArray();
-  res.json({ ok: true, users });
-});
-
-// ===== FALLBACK =====
-app.use((req, res) => {
-  res.status(404).send("404 - Not Found");
-});
-
-// ===== START (MongoDB bağlan, sonra server aç) =====
-async function start() {
+// LOGOUT (client çağırmasa bile olur, ama düzenli)
+app.post("/api/auth/logout", authRequired, async (req, res) => {
   try {
-    console.log("🔌 MongoDB bağlanıyor...");
-    await client.connect();
-    db = client.db(DB_NAME);
-    usersCol = db.collection("users");
-
-    // email tekil olsun (ilk çalışmada kurar)
-    await usersCol.createIndex({ email: 1 }, { unique: true });
-
-    console.log("✅ MongoDB connected. DB:", DB_NAME);
-
-    app.listen(PORT, () => {
-      console.log(`🚀 Server çalışıyor: http://localhost:${PORT}`);
-    });
-  } catch (err) {
-    console.error("❌ MongoDB connection failed:", err);
-    process.exit(1);
-  }
-}
-const connectDB = require("./db");
-
-start();
-
-const bcrypt = require("bcrypt");
-const crypto = require("crypto");
-const nodemailer = require("nodemailer");
-
-// ====== Mail Transporter ======
-const transporter = nodemailer.createTransport({
-  host: process.env.SMTP_HOST,
-  port: Number(process.env.SMTP_PORT || 587),
-  secure: false,
-  auth: {
-    user: process.env.SMTP_USER,
-    pass: process.env.SMTP_PASS
+    if (req.token) sessions.delete(req.token);
+    res.json({ ok: true });
+  } catch {
+    res.json({ ok: true });
   }
 });
 
-const RESET_CODE_TTL_MIN = Number(process.env.RESET_CODE_TTL_MIN || 10);
-const RESET_TOKEN_TTL_MIN = Number(process.env.RESET_TOKEN_TTL_MIN || 15);
-
-function nowPlusMinutes(min) {
-  return new Date(Date.now() + min * 60 * 1000);
-}
-
-function gen6DigitCode() {
-  // 100000-999999
-  return String(Math.floor(100000 + Math.random() * 900000));
-}
-
-function genToken() {
-  return crypto.randomBytes(32).toString("hex");
-}
-
-function normalizeEmail(s) {
-  return String(s || "").trim().toLowerCase();
-}
-
-// Kullanıcı collection’ını senin db.js’e göre ayarla:
-function usersCol(db) {
-  return db.collection("users"); // sende farklıysa değiştir
-}
-
-// ====== 1) FORGOT: kod gönder ======
+// ====== FORGOT: kod gönder ======
 app.post("/api/auth/forgot", async (req, res) => {
   try {
     const { role, email } = req.body || {};
-    const emailNorm = normalizeEmail(email);
+    const emailNorm = normEmail(email);
 
-    // güvenlik: her zaman ok dön
-    if (!emailNorm) return res.json({ ok: true });
+    if (!emailNorm || !isValidRole(role)) return res.json({ ok: true });
 
-    const db = req.app.locals.db; // sende db erişimi farklıysa söyle
-    const col = usersCol(db);
+    const users = col("users");
+    const user = await users.findOne({ email: emailNorm });
 
-    const user = await col.findOne({ role, email: emailNorm });
-
-    if (!user) {
-      // var/yok belli etme
+    if (!user || !Array.isArray(user.roles) || !user.roles.includes(role)) {
       return res.json({ ok: true });
     }
 
     const code = gen6DigitCode();
     const codeHash = await bcrypt.hash(code, 10);
 
-    await col.updateOne(
+    await users.updateOne(
       { _id: user._id },
       {
         $set: {
           resetCodeHash: codeHash,
-          resetCodeExp: nowPlusMinutes(RESET_CODE_TTL_MIN),
-          resetCodeTries: 0
+          resetCodeExp: nowPlusMinutes(RESET_CODE_TTL_MIN).toISOString(),
+          resetCodeTries: 0,
+          resetRole: role,
         },
-        $unset: {
-          resetToken: "",
-          resetTokenExp: ""
-        }
+        $unset: { resetToken: "", resetTokenExp: "" },
       }
     );
 
-    // Mail gönder
-    const from = process.env.SMTP_FROM || process.env.SMTP_USER;
-    await transporter.sendMail({
-      from,
-      to: emailNorm,
-      subject: "Şifre Sıfırlama Kodu",
-      text:
-        `Şifre sıfırlama kodun: ${code}\n` +
-        `Bu kod ${RESET_CODE_TTL_MIN} dakika geçerlidir.\n` +
-        `Eğer bu işlemi sen yapmadıysan bu maili yok say.`
-    });
+    if (mailEnabled && transporter) {
+      await transporter.sendMail({
+        from: SMTP_FROM,
+        to: emailNorm,
+        subject: "Şifre Sıfırlama Kodu",
+        text:
+          `Şifre sıfırlama kodun: ${code}\n` +
+          `Bu kod ${RESET_CODE_TTL_MIN} dakika geçerlidir.\n` +
+          `Eğer bu işlemi sen yapmadıysan bu maili yok say.`,
+      });
+    } else {
+      console.log("⚠️ SMTP yok. Reset kodu:", code, "email:", emailNorm);
+    }
 
     return res.json({ ok: true });
   } catch (err) {
     console.error("FORGOT ERROR:", err);
-    // güvenlik: yine ok dön
     return res.json({ ok: true });
   }
 });
 
-// ====== 2) VERIFY: kodu doğrula -> resetToken üret ======
+// ====== VERIFY: kod doğrula -> resetToken ======
 app.post("/api/auth/reset/verify", async (req, res) => {
   try {
     const { role, email, code } = req.body || {};
-    const emailNorm = normalizeEmail(email);
+    const emailNorm = normEmail(email);
     const codeStr = String(code || "").trim();
 
-    if (!emailNorm || !codeStr) {
-      return res.status(400).json({ ok: false, message: "E-posta ve kod gerekli." });
+    if (!emailNorm || !codeStr || !isValidRole(role)) {
+      return res.status(400).json({ ok: false, message: "E-posta, rol ve kod gerekli." });
     }
 
-    const db = req.app.locals.db;
-    const col = usersCol(db);
+    const users = col("users");
+    const user = await users.findOne({ email: emailNorm });
 
-    const user = await col.findOne({ role, email: emailNorm });
-    if (!user || !user.resetCodeHash || !user.resetCodeExp) {
+    if (!user || user.resetRole !== role || !user.resetCodeHash || !user.resetCodeExp) {
       return res.status(400).json({ ok: false, message: "Kod geçersiz veya süresi dolmuş." });
     }
 
@@ -339,19 +363,14 @@ app.post("/api/auth/reset/verify", async (req, res) => {
 
     const ok = await bcrypt.compare(codeStr, user.resetCodeHash);
     if (!ok) {
-      await col.updateOne({ _id: user._id }, { $inc: { resetCodeTries: 1 } });
+      await users.updateOne({ _id: user._id }, { $inc: { resetCodeTries: 1 } });
       return res.status(400).json({ ok: false, message: "Kod yanlış." });
     }
 
     const token = genToken();
-    await col.updateOne(
+    await users.updateOne(
       { _id: user._id },
-      {
-        $set: {
-          resetToken: token,
-          resetTokenExp: nowPlusMinutes(RESET_TOKEN_TTL_MIN)
-        }
-      }
+      { $set: { resetToken: token, resetTokenExp: nowPlusMinutes(RESET_TOKEN_TTL_MIN).toISOString() } }
     );
 
     return res.json({ ok: true, resetToken: token });
@@ -361,36 +380,35 @@ app.post("/api/auth/reset/verify", async (req, res) => {
   }
 });
 
-// ====== 3) RESET: token ile şifreyi değiştir ======
+// ====== RESET: token ile şifreyi değiştir ======
 app.post("/api/auth/reset", async (req, res) => {
   try {
     const { role, email, resetToken, newPassword } = req.body || {};
-    const emailNorm = normalizeEmail(email);
+    const emailNorm = normEmail(email);
     const token = String(resetToken || "").trim();
     const pw = String(newPassword || "");
 
-    if (!emailNorm || !token || !pw) {
+    if (!emailNorm || !token || !pw || !isValidRole(role)) {
       return res.status(400).json({ ok: false, message: "Eksik bilgi." });
     }
     if (pw.length < 6) {
       return res.status(400).json({ ok: false, message: "Şifre en az 6 karakter olmalı." });
     }
 
-    const db = req.app.locals.db;
-    const col = usersCol(db);
+    const users = col("users");
+    const user = await users.findOne({ email: emailNorm });
 
-    const user = await col.findOne({ role, email: emailNorm });
-    if (!user || user.resetToken !== token || !user.resetTokenExp) {
+    if (!user || user.resetRole !== role || user.resetToken !== token || !user.resetTokenExp) {
       return res.status(400).json({ ok: false, message: "Yetkisiz veya süresi dolmuş." });
     }
+
     if (new Date(user.resetTokenExp) < new Date()) {
       return res.status(400).json({ ok: false, message: "Sıfırlama oturumu süresi dolmuş." });
     }
 
-    // Eğer sistemde şifreler plain tutuluyorsa bu noktadan itibaren HASH’e geçiyoruz.
     const passwordHash = await bcrypt.hash(pw, 10);
 
-    await col.updateOne(
+    await users.updateOne(
       { _id: user._id },
       {
         $set: { password: passwordHash },
@@ -399,8 +417,9 @@ app.post("/api/auth/reset", async (req, res) => {
           resetCodeExp: "",
           resetCodeTries: "",
           resetToken: "",
-          resetTokenExp: ""
-        }
+          resetTokenExp: "",
+          resetRole: "",
+        },
       }
     );
 
@@ -411,3 +430,396 @@ app.post("/api/auth/reset", async (req, res) => {
   }
 });
 
+// ============================
+// CLASSES + JOIN (classes, class_members)
+// ============================
+
+// Teacher: sınıf oluştur
+app.post("/api/classes/create", authRequired, async (req, res) => {
+  try {
+    if (req.auth.role !== "teacher") {
+      return res.status(403).json({ ok: false, message: "Sadece öğretmen." });
+    }
+    const { name, desc } = req.body || {};
+    const n = safeName(name);
+    if (!n) return res.status(400).json({ ok: false, message: "Sınıf adı zorunlu." });
+
+    const classes = col("classes");
+
+    // 6 haneli kod benzersiz
+    let code = "";
+    for (let i = 0; i < 15; i++) {
+      code = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789"
+        .split("")
+        .sort(() => 0.5 - Math.random())
+        .slice(0, 6)
+        .join("");
+      const exists = await classes.findOne({ code });
+      if (!exists) break;
+    }
+
+    const item = {
+      id: makeId("cls"),
+      teacherId: req.auth.userId,
+      name: n,
+      desc: safeName(desc),
+      code,
+      createdAt: new Date().toISOString(),
+    };
+
+    await classes.insertOne(item);
+    res.json({ ok: true, class: item });
+  } catch (err) {
+    console.error("CLASS CREATE ERROR:", err);
+    res.status(500).json({ ok: false, message: "Sunucu hatası." });
+  }
+});
+
+// Teacher: kendi sınıfları
+app.get("/api/classes/mine", authRequired, async (req, res) => {
+  try {
+    if (req.auth.role !== "teacher") return res.status(403).json({ ok: false, message: "Sadece öğretmen." });
+    const teacherId = String(req.query.teacherId || "").trim() || req.auth.userId;
+
+    if (teacherId !== req.auth.userId) return res.status(403).json({ ok: false, message: "Yetkisiz." });
+
+    const classes = await col("classes")
+      .find({ teacherId }, { projection: { _id: 0 } })
+      .sort({ createdAt: -1 })
+      .toArray();
+
+    res.json({ ok: true, classes });
+  } catch (err) {
+    console.error("MINE CLASSES ERROR:", err);
+    res.status(500).json({ ok: false, message: "Sunucu hatası." });
+  }
+});
+
+// Code ile sınıf bul
+app.get("/api/classes/search", async (req, res) => {
+  try {
+    const code = String(req.query.code || "").trim().toUpperCase();
+    if (code.length !== 6) return res.status(400).json({ ok: false, message: "Kod 6 haneli olmalı." });
+
+    const cls = await col("classes").findOne({ code }, { projection: { _id: 0 } });
+    if (!cls) return res.status(404).json({ ok: false, message: "Sınıf bulunamadı." });
+
+    const teacher = await col("users").findOne({ id: cls.teacherId }, { projection: { _id: 0, name: 1 } });
+    res.json({ ok: true, class: { ...cls, teacherName: teacher?.name || "" } });
+  } catch (err) {
+    console.error("CLASS SEARCH ERROR:", err);
+    res.status(500).json({ ok: false, message: "Sunucu hatası." });
+  }
+});
+
+// Öğretmen adına göre sınıf ara
+app.get("/api/classes/search-by-teacher", async (req, res) => {
+  try {
+    const q = String(req.query.teacher || "").trim().toLowerCase();
+    if (!q) return res.json({ ok: true, classes: [] });
+
+    const teachers = await col("users")
+      .find({ name: { $regex: q, $options: "i" }, roles: "teacher" }, { projection: { _id: 0, id: 1, name: 1 } })
+      .limit(20)
+      .toArray();
+
+    const teacherIds = teachers.map((t) => t.id);
+    if (!teacherIds.length) return res.json({ ok: true, classes: [] });
+
+    const classes = await col("classes")
+      .find({ teacherId: { $in: teacherIds } }, { projection: { _id: 0 } })
+      .limit(50)
+      .toArray();
+
+    const nameMap = new Map(teachers.map((t) => [t.id, t.name]));
+    const out = classes.map((c) => ({ ...c, teacherName: nameMap.get(c.teacherId) || "" }));
+
+    res.json({ ok: true, classes: out });
+  } catch (err) {
+    console.error("SEARCH BY TEACHER ERROR:", err);
+    res.status(500).json({ ok: false, message: "Sunucu hatası." });
+  }
+});
+
+// Sınıfa katıl (student)
+app.post("/api/classes/join", authRequired, async (req, res) => {
+  try {
+    if (req.auth.role !== "student") {
+      return res.status(403).json({ ok: false, message: "Sadece öğrenci katılabilir." });
+    }
+
+    const { classId, studentName } = req.body || {};
+    if (!classId) return res.status(400).json({ ok: false, message: "classId gerekli." });
+
+    const cls = await col("classes").findOne({ id: classId }, { projection: { _id: 0 } });
+    if (!cls) return res.status(404).json({ ok: false, message: "Sınıf bulunamadı." });
+
+    const members = col("class_members");
+    const exists = await members.findOne({ classId, studentId: req.auth.userId });
+    if (exists) return res.json({ ok: true, message: "Zaten üyesin." });
+
+    const mem = {
+      id: makeId("mem"),
+      classId,
+      studentId: req.auth.userId,
+      studentName: safeName(studentName) || "Öğrenci",
+      joinedAt: new Date().toISOString(),
+    };
+
+    await members.insertOne(mem);
+    res.json({ ok: true, membership: mem });
+  } catch (err) {
+    console.error("JOIN ERROR:", err);
+    res.status(500).json({ ok: false, message: "Sunucu hatası." });
+  }
+});
+
+// Öğrencinin katıldığı sınıflar
+app.get("/api/classes/my", async (req, res) => {
+  try {
+    const studentId = String(req.query.studentId || "").trim();
+    if (!studentId) return res.json({ ok: true, classes: [] });
+
+    const mems = await col("class_members")
+      .find({ studentId }, { projection: { _id: 0, classId: 1 } })
+      .toArray();
+
+    const ids = mems.map((m) => m.classId);
+    if (!ids.length) return res.json({ ok: true, classes: [] });
+
+    const classes = await col("classes")
+      .find({ id: { $in: ids } }, { projection: { _id: 0 } })
+      .toArray();
+
+    res.json({ ok: true, classes });
+  } catch (err) {
+    console.error("MY CLASSES ERROR:", err);
+    res.status(500).json({ ok: false, message: "Sunucu hatası." });
+  }
+});
+
+// ============================
+// ASSIGNMENTS (API)
+// ============================
+
+// Teacher: create assignment
+app.post("/api/assignments/create", authRequired, async (req, res) => {
+  try {
+    if (req.auth.role !== "teacher") return res.status(403).json({ ok: false, message: "Sadece öğretmen." });
+
+    const { classId, course, title, desc, due } = req.body || {};
+    if (!classId || !course || !title || !due) return res.status(400).json({ ok: false, message: "Eksik alan var." });
+
+    // öğretmen bu sınıfın sahibi mi?
+    const cls = await col("classes").findOne({ id: classId }, { projection: { _id: 0 } });
+    if (!cls) return res.status(404).json({ ok: false, message: "Sınıf bulunamadı." });
+    if (cls.teacherId !== req.auth.userId) return res.status(403).json({ ok: false, message: "Yetkisiz." });
+
+    const item = {
+      id: makeId("ass"),
+      classId,
+      teacherId: req.auth.userId,
+      course: safeName(course),
+      title: safeName(title),
+      desc: safeName(desc),
+      due: new Date(due).toISOString(),
+      createdAt: new Date().toISOString(),
+    };
+
+    await col("assignments").insertOne(item);
+    res.json({ ok: true, assignment: item });
+  } catch (err) {
+    console.error("ASSIGN CREATE ERROR:", err);
+    res.status(500).json({ ok: false, message: "Sunucu hatası." });
+  }
+});
+
+// Student/Teacher: get assignments by class
+app.get("/api/assignments/by-class", authRequired, async (req, res) => {
+  try {
+    const classId = String(req.query.classId || "").trim();
+    if (!classId) return res.json({ ok: true, assignments: [] });
+
+    const list = await col("assignments")
+      .find({ classId }, { projection: { _id: 0 } })
+      .sort({ createdAt: -1 })
+      .toArray();
+
+    res.json({ ok: true, assignments: list });
+  } catch (err) {
+    console.error("ASSIGN BY CLASS ERROR:", err);
+    res.status(500).json({ ok: false, message: "Sunucu hatası." });
+  }
+});
+
+// ============================
+// SUBMISSIONS (Upload + Lists + Review)
+// ============================
+
+// Student: upload submission
+app.post("/api/submissions/upload", authRequired, upload.single("file"), async (req, res) => {
+  try {
+    if (req.auth.role !== "student") {
+      return res.status(403).json({ ok: false, message: "Sadece öğrenci teslim edebilir." });
+    }
+
+    const { classId, assignmentId, teacherId, studentName, course, title, studentNote } = req.body || {};
+    if (!req.file) return res.status(400).json({ ok: false, message: "Dosya zorunlu." });
+    if (!classId || !assignmentId || !teacherId) {
+      return res.status(400).json({ ok: false, message: "Eksik alan var." });
+    }
+
+    // tekrar teslim engeli (isteğe bağlı)
+    const exists = await col("submissions").findOne({
+      classId,
+      assignmentId,
+      studentId: req.auth.userId,
+    });
+    if (exists) {
+      // dosyayı da çöpe at (boşuna dolmasın)
+      try { fs.unlinkSync(path.join(uploadDir, req.file.filename)); } catch {}
+      return res.status(409).json({ ok: false, message: "Bu ödeve zaten teslim yaptın." });
+    }
+
+    const item = {
+      id: makeId("sub"),
+      classId,
+      assignmentId,
+      teacherId,
+      studentId: req.auth.userId,
+      studentName: safeName(studentName) || "Öğrenci",
+      course: course || "",
+      title: title || "",
+      studentNote: studentNote || "",
+      submittedAt: new Date().toISOString(),
+      status: "pending",
+      grade: "",
+      feedback: "",
+
+      originalFileName: req.file.originalname,
+      storedFileName: req.file.filename,
+      filePath: `/uploads/${req.file.filename}`, // ✅ frontend bunu linkte kullanıyor
+      size: req.file.size,
+      mimeType: req.file.mimetype,
+    };
+
+    await col("submissions").insertOne(item);
+    res.json({ ok: true, submission: item });
+  } catch (err) {
+    console.error("UPLOAD ERROR:", err);
+    res.status(500).json({ ok: false, message: err.message || "Upload başarısız." });
+  }
+});
+
+// Teacher: class submissions
+app.get("/api/teacher/submissions", authRequired, async (req, res) => {
+  try {
+    if (req.auth.role !== "teacher") {
+      return res.status(403).json({ ok: false, message: "Sadece öğretmen." });
+    }
+    const classId = String(req.query.classId || "").trim();
+    if (!classId) return res.json({ ok: true, submissions: [] });
+
+    const subs = await col("submissions")
+      .find({ classId, teacherId: req.auth.userId }, { projection: { _id: 0 } })
+      .sort({ submittedAt: -1 })
+      .toArray();
+
+    res.json({ ok: true, submissions: subs });
+  } catch (err) {
+    console.error("TEACHER SUBS ERROR:", err);
+    res.status(500).json({ ok: false, message: "Sunucu hatası." });
+  }
+});
+
+// Student: my submissions by class
+app.get("/api/student/submissions", authRequired, async (req, res) => {
+  try {
+    if (req.auth.role !== "student") return res.status(403).json({ ok: false, message: "Sadece öğrenci." });
+
+    const classId = String(req.query.classId || "").trim();
+    if (!classId) return res.json({ ok: true, submissions: [] });
+
+    const subs = await col("submissions")
+      .find({ classId, studentId: req.auth.userId }, { projection: { _id: 0 } })
+      .sort({ submittedAt: -1 })
+      .toArray();
+
+    res.json({ ok: true, submissions: subs });
+  } catch (err) {
+    console.error("STUDENT SUBS ERROR:", err);
+    res.status(500).json({ ok: false, message: "Sunucu hatası." });
+  }
+});
+
+// Teacher: grade/review submission
+app.post("/api/teacher/submissions/review", authRequired, async (req, res) => {
+  try {
+    if (req.auth.role !== "teacher") return res.status(403).json({ ok: false, message: "Sadece öğretmen." });
+
+    const { submissionId, status, grade, feedback } = req.body || {};
+    if (!submissionId) return res.status(400).json({ ok: false, message: "submissionId gerekli." });
+
+    const sub = await col("submissions").findOne({ id: submissionId });
+    if (!sub) return res.status(404).json({ ok: false, message: "Teslim bulunamadı." });
+
+    if (sub.teacherId !== req.auth.userId) return res.status(403).json({ ok: false, message: "Yetkisiz." });
+
+    let gradeVal = "";
+    if (grade !== "" && grade !== null && typeof grade !== "undefined") {
+      const n = Number(grade);
+      if (Number.isNaN(n) || n < 0 || n > 100) return res.status(400).json({ ok: false, message: "Not 0-100 olmalı." });
+      gradeVal = Math.round(n);
+    }
+
+    const st = status === "graded" ? "graded" : "pending";
+    const fb = safeName(feedback);
+
+    await col("submissions").updateOne(
+      { id: submissionId },
+      { $set: { status: st, grade: gradeVal, feedback: fb } }
+    );
+
+    res.json({ ok: true });
+  } catch (err) {
+    console.error("REVIEW ERROR:", err);
+    res.status(500).json({ ok: false, message: "Sunucu hatası." });
+  }
+});
+
+// ===== FALLBACK =====
+app.use((req, res) => {
+  res.status(404).send("404 - Not Found");
+});
+
+// ============================
+// START
+// ============================
+async function start() {
+  try {
+    console.log("🔌 MongoDB bağlanıyor...");
+    await client.connect();
+    db = client.db(DB_NAME);
+    app.locals.db = db;
+
+    // indexes
+    await col("users").createIndex({ email: 1 }, { unique: true });
+    await col("classes").createIndex({ code: 1 }, { unique: true });
+    await col("class_members").createIndex({ classId: 1, studentId: 1 }, { unique: true });
+    await col("assignments").createIndex({ classId: 1, teacherId: 1, createdAt: -1 });
+    await col("submissions").createIndex({ classId: 1, teacherId: 1, submittedAt: -1 });
+    await col("submissions").createIndex({ classId: 1, assignmentId: 1, studentId: 1 }, { unique: true });
+
+    console.log("✅ MongoDB connected. DB:", DB_NAME);
+
+    app.listen(PORT, () => {
+      console.log(`🚀 Server çalışıyor: http://localhost:${PORT}`);
+      console.log(`📁 Uploads: http://localhost:${PORT}/uploads/<dosya>`);
+    });
+  } catch (err) {
+    console.error("❌ START ERROR:", err);
+    process.exit(1);
+  }
+}
+
+start();
