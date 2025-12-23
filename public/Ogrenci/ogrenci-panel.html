@@ -135,55 +135,60 @@
       </section>
 
       <!-- SUBMIT -->
-      <section class="view" id="view-submit">
-        <div class="page-head">
-          <div>
-            <h1>Teslim Et</h1>
-            <p class="muted">Ödev seç, dosya adını yaz, not ekle, gönder.</p>
-          </div>
-          <div class="chip" id="subClassChip">Sınıf: —</div>
+<section class="view" id="view-submit">
+  <div class="page-head">
+    <div>
+      <h1>Teslim Et</h1>
+      <p class="muted">Ödev seç, PDF/ZIP dosyasını seç, not ekle, gönder.</p>
+    </div>
+    <div class="chip" id="subClassChip">Sınıf: —</div>
+  </div>
+
+  <div class="grid-2">
+    <div class="panel">
+      <div class="panel-title">Ödev Seç</div>
+      <div class="panel-sub">Seçili sınıftaki ödevlerden birini seç.</div>
+
+      <div class="field">
+        <label for="assignmentSelect">Ödev</label>
+        <select id="assignmentSelect"></select>
+      </div>
+
+      <div class="empty" id="emptyAssignSelect" hidden>
+        Bu sınıfta ödev yok. Öğretmen ödev açınca burada görünür.
+      </div>
+
+      <div class="split"></div>
+
+      <div class="tip">
+        <b>Not:</b> Sadece <span class="mono">.pdf</span> veya <span class="mono">.zip</span> yükleyebilirsin.
+      </div>
+    </div>
+
+    <div class="panel">
+      <div class="panel-title">Teslim Bilgisi</div>
+      <div class="panel-sub">Dosyayı seç ve gönder.</div>
+
+      <form id="submitForm" class="form">
+        <!-- ✅ GERÇEK DOSYA -->
+        <div class="field">
+          <label for="fileInput">Dosya (PDF/ZIP)</label>
+          <input type="file" id="fileInput" accept=".pdf,.zip" required />
         </div>
 
-        <div class="grid-2">
-          <div class="panel">
-            <div class="panel-title">Ödev Seç</div>
-            <div class="panel-sub">Seçili sınıftaki ödevlerden birini seç.</div>
-
-            <div class="field">
-              <label for="assignmentSelect">Ödev</label>
-              <select id="assignmentSelect"></select>
-            </div>
-
-            <div class="empty" id="emptyAssignSelect" hidden>Bu sınıfta ödev yok. Öğretmen ödev açınca burada görünür.</div>
-
-            <div class="split"></div>
-
-            <div class="tip">
-              <b>Dosya adı önerisi:</b> <span class="mono">AdSoyad_Ders_Odev1.pdf</span>
-            </div>
-          </div>
-
-          <div class="panel">
-            <div class="panel-title">Teslim Bilgisi</div>
-            <div class="panel-sub">Bu demo sürümde gerçek dosya yükleme yok, sadece “dosya adı” alıyoruz.</div>
-
-            <form id="submitForm" class="form">
-              <div class="field">
-                <label for="fileName">Dosya Adı</label>
-                <input id="fileName" type="text" placeholder="Örn: AliYilmaz_Mat_Odev1.pdf" />
-              </div>
-
-              <div class="field">
-                <label for="studentNote">Öğrenci Notu (opsiyonel)</label>
-                <textarea id="studentNote" rows="4" placeholder="Kısa not..."></textarea>
-              </div>
-
-              <button class="btn primary" type="submit">Teslim Et</button>
-              <div class="alert" id="submitAlert" hidden></div>
-            </form>
-          </div>
+        <div class="field">
+          <label for="studentNote">Öğrenci Notu (opsiyonel)</label>
+          <textarea id="studentNote" rows="4" placeholder="Kısa not..."></textarea>
         </div>
-      </section>
+
+        <button class="btn primary" type="submit">Teslim Et</button>
+        <div class="alert" id="submitAlert" hidden></div>
+      </form>
+    </div>
+  </div>
+</section>
+
+
 
       <!-- HISTORY -->
       <section class="view" id="view-history">
@@ -308,6 +313,6 @@
     </div>
   </div>
 
-  <script src="ogrenci.js"></script>
+  <script src="ogrenci.js" defer></script>
 </body>
 </html>

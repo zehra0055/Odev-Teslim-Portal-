@@ -1,58 +1,15 @@
 "use strict";
 
 /**
- * ✅ FIX: Sınıflar localStorage yerine BACKEND'de tutuluyor.
- * Böylece öğrenci kodla arayınca sınıf görünecek.
- *
- * Gerekli endpointler:
- *  - POST /api/classes/create   body: { name, desc, teacherId, teacherName }
- *  - GET  /api/classes/mine?teacherId=...
- *
- * Diğer datalar (ödev/teslim/üyeler) şimdilik localStorage'da kaldı.
- * İstersen onları da API’ye taşırız.
+ * ✅ ÖĞRETMEN PANEL JS (FULL BACKEND)
+ * - Auth: token/role/user localStorage
+ * - Classes: BACKEND (mine/create)
+ * - Members: BACKEND (by class)
+ * - Assignments: BACKEND (create/list by class)
+ * - Submissions: BACKEND (list by class + review)
  */
 
-// ========= STORAGE KEYS =========
-const KEY_CLASS_MEMBERS = "otp_class_members";   // {id, classId, studentId, studentName, joinedAt}
-const KEY_ASSIGNMENTS = "otp_assignments";       // {id, classId, teacherId, course, title, desc, due, createdAt}
-const KEY_SUBMISSIONS = "otp_submissions";       // {id, classId, assignmentId, teacherId, studentId, studentName, course, title, fileName, submittedAt, status, grade, feedback}
-
-// ========= helpers =========
-function load(key, fallback){
-  try { const v = localStorage.getItem(key); return v ? JSON.parse(v) : fallback; }
-  catch { return fallback; }
-}
-function save(key, value){ localStorage.setItem(key, JSON.stringify(value)); }
-
-function uid(prefix="id"){
-  return `${prefix}_${Math.random().toString(16).slice(2)}_${Date.now()}`;
-}
-
-function fmtDate(iso){
-  try { return new Date(iso).toLocaleString("tr-TR"); } catch { return iso; }
-}
-function fmtOnlyDate(iso){
-  try { return new Date(iso).toLocaleDateString("tr-TR"); } catch { return iso; }
-}
-
-function setAlert(el, type, text){
-  el.hidden = false;
-  el.classList.remove("ok","err");
-  el.classList.add(type);
-  el.textContent = text;
-}
-function clearAlert(el){
-  el.hidden = true;
-  el.classList.remove("ok","err");
-  el.textContent = "";
-}
-
-function pillForStatus(s){
-  if (s === "graded") return `<span class="pill ok">Notlandırıldı</span>`;
-  return `<span class="pill warn">Bekliyor</span>`;
-}
-
-// ========= auth guard (NEW SYSTEM) =========
+// ========= AUTH GUARD =========
 const token = localStorage.getItem("token");
 const role = localStorage.getItem("role");
 let me = null;
@@ -67,25 +24,75 @@ if (!token || role !== "teacher" || !me) {
   window.location.replace("/Ogretmen/ogretmen-giris.html");
 }
 
+// ========= HELPERS =========
+function uid(prefix = "id") {
+  return `${prefix}_${Math.random().toString(16).slice(2)}_${Date.now()}`;
+}
+
+function fmtDate(iso) {
+  try {
+    return new Date(iso).toLocaleString("tr-TR");
+  } catch {
+    return iso;
+  }
+}
+
+function fmtOnlyDate(iso) {
+  try {
+    return new Date(iso).toLocaleDateString("tr-TR");
+  } catch {
+    return iso;
+  }
+}
+
+function setAlert(el, type, text) {
+  if (!el) return;
+  el.hidden = false;
+  el.classList.remove("ok", "err");
+  el.classList.add(type);
+  el.textContent = text;
+}
+
+function clearAlert(el) {
+  if (!el) return;
+  el.hidden = true;
+  el.classList.remove("ok", "err");
+  el.textContent = "";
+}
+
+function pillForStatus(s) {
+  if (s === "graded") return `<span class="pill ok">Notlandırıldı</span>`;
+  return `<span class="pill warn">Bekliyor</span>`;
+}
+
 // ========= API =========
 const API_BASE = ""; // aynı origin
 async function apiFetch(path, options = {}) {
   const headers = {
-    "Content-Type": "application/json",
-    ...(options.headers || {})
+    ...(options.headers || {}),
   };
 
-  // token varsa gönder (server kontrol etmese bile sorun değil)
+  // GET isteklerinde Content-Type koymak bazen gereksiz; ama JSON göndereceksek koyalım
+  const method = (options.method || "GET").toUpperCase();
+  const hasBody = options.body !== undefined && options.body !== null;
+
+  if (hasBody) headers["Content-Type"] = "application/json";
   if (token) headers["Authorization"] = `Bearer ${token}`;
 
-  const res = await fetch(API_BASE + path, { ...options, headers });
+  const res = await fetch(API_BASE + path, { ...options, method, headers });
+
   let data = null;
-  try { data = await res.json(); } catch { /* ignore */ }
+  try {
+    data = await res.json();
+  } catch {
+    // ignore
+  }
 
   if (!res.ok) {
     const msg = data?.message || `İstek başarısız: ${res.status}`;
     throw new Error(msg);
   }
+
   return data;
 }
 
@@ -180,54 +187,80 @@ const infoClassDesc = document.getElementById("infoClassDesc");
 const copyClassCode = document.getElementById("copyClassCode");
 const copyAlert = document.getElementById("copyAlert");
 
-// state
+// ========= STATE =========
 let activeClassId = null;
 let selectedSubmissionId = null;
 
-// ✅ sınıfları artık API'den çekiyoruz (cache)
 let classesCache = [];
+let membersCache = [];
+let assignmentsCache = [];
+let submissionsCache = [];
 
-// ========= DATA LAYER =========
-async function getClasses(){
-  // teacher'ın sınıflarını backend'den çek
+// ========= DATA LAYER (BACKEND) =========
+async function getClasses() {
   const data = await apiFetch(`/api/classes/mine?teacherId=${encodeURIComponent(me.id)}`);
-  const list = Array.isArray(data?.classes) ? data.classes : [];
-  return list;
+  return Array.isArray(data?.classes) ? data.classes : [];
 }
 
-function getMembersByClass(classId){
-  const all = load(KEY_CLASS_MEMBERS, []);
-  return all.filter(m => m.classId === classId);
+async function getMembersByClass(classId) {
+  const data = await apiFetch(`/api/classes/members?classId=${encodeURIComponent(classId)}`);
+  return Array.isArray(data?.members) ? data.members : [];
 }
 
-function getAssignmentsByClass(classId){
-  const all = load(KEY_ASSIGNMENTS, []);
-  return all.filter(a => a.classId === classId && a.teacherId === me.id);
-}
-function saveAssignments(listForTeacher){
-  const all = load(KEY_ASSIGNMENTS, []);
-  const rest = all.filter(a => a.teacherId !== me.id);
-  save(KEY_ASSIGNMENTS, [...listForTeacher, ...rest]);
+async function getAssignmentsByClass(classId) {
+  const data = await apiFetch(`/api/assignments/byClass?classId=${encodeURIComponent(classId)}`);
+  return Array.isArray(data?.assignments) ? data.assignments : [];
 }
 
-function getSubmissionsByClass(classId){
-  const all = load(KEY_SUBMISSIONS, []);
-  return all.filter(s => s.classId === classId && s.teacherId === me.id);
+async function createAssignmentApi({ classId, course, title, desc, due }) {
+  const body = {
+    classId,
+    teacherId: me.id,
+    teacherName: me.name || "Öğretmen",
+    course: (course || "").trim(),
+    title: (title || "").trim(),
+    desc: (desc || "").trim(),
+    due: due ? new Date(due).toISOString() : "",
+    clientId: uid("ass"), // idyi backend üretse bile debug için iyi
+  };
+
+  const data = await apiFetch(`/api/assignments/create`, {
+    method: "POST",
+    body: JSON.stringify(body),
+  });
+
+  return data?.assignment || null;
 }
-function saveSubmissions(listForTeacher){
-  const all = load(KEY_SUBMISSIONS, []);
-  const rest = all.filter(s => s.teacherId !== me.id);
-  save(KEY_SUBMISSIONS, [...listForTeacher, ...rest]);
+
+async function getSubmissionsByClass(classId) {
+  const data = await apiFetch(`/api/submissions/byClass?classId=${encodeURIComponent(classId)}`);
+  return Array.isArray(data?.submissions) ? data.submissions : [];
+}
+
+async function reviewSubmissionApi({ submissionId, grade, status, feedback }) {
+  const body = {
+    submissionId,
+    grade, // "" veya sayı
+    status,
+    feedback,
+  };
+
+  const data = await apiFetch(`/api/submissions/review`, {
+    method: "PATCH",
+    body: JSON.stringify(body),
+  });
+
+  return data?.submission || null;
 }
 
 // ========= UI / NAV =========
-function setView(name){
-  navBtns.forEach(b => b.classList.toggle("active", b.dataset.view === name));
+function setView(name) {
+  navBtns.forEach((b) => b.classList.toggle("active", b.dataset.view === name));
   Object.entries(views).forEach(([k, el]) => el.classList.toggle("active", k === name));
 }
 
-function setActiveClassChip(){
-  const cls = classesCache.find(c => c.id === activeClassId);
+function setActiveClassChip() {
+  const cls = classesCache.find((c) => c.id === activeClassId);
   const label = cls ? `Sınıf: ${cls.name}` : "Sınıf: —";
   activeClassChip.textContent = label;
   assignClassChip.textContent = label;
@@ -235,13 +268,16 @@ function setActiveClassChip(){
   studClassChip.textContent = label;
 }
 
-async function fillClassSelect(){
+async function fillClassSelect() {
   classSelect.innerHTML = "";
+
   try {
-    classesCache = (await getClasses()).sort((a,b)=> (a.createdAt||"").localeCompare(b.createdAt||""));
+    classesCache = (await getClasses()).sort((a, b) =>
+      (a.createdAt || "").localeCompare(b.createdAt || "")
+    );
   } catch (err) {
-    classesCache = [];
     console.error(err);
+    classesCache = [];
   }
 
   if (!classesCache.length) {
@@ -256,21 +292,23 @@ async function fillClassSelect(){
   }
 
   classSelect.disabled = false;
-  classesCache.forEach(c => {
+
+  classesCache.forEach((c) => {
     const opt = document.createElement("option");
     opt.value = c.id;
     opt.textContent = `${c.name} (${c.code})`;
     classSelect.appendChild(opt);
   });
 
-  if (!activeClassId || !classesCache.some(c => c.id === activeClassId)) {
+  if (!activeClassId || !classesCache.some((c) => c.id === activeClassId)) {
     activeClassId = classesCache[0].id;
   }
+
   classSelect.value = activeClassId;
   setActiveClassChip();
 }
 
-function requireActiveClass(){
+function requireActiveClass() {
   if (!activeClassId) {
     alert("Önce bir sınıf oluşturmalısın.");
     return false;
@@ -279,7 +317,7 @@ function requireActiveClass(){
 }
 
 // ========= RENDER =========
-function renderKPIs(){
+function renderKPIs() {
   if (!activeClassId) {
     kpiStudents.textContent = "0";
     kpiAssignments.textContent = "0";
@@ -288,10 +326,10 @@ function renderKPIs(){
     return;
   }
 
-  const members = getMembersByClass(activeClassId);
-  const as = getAssignmentsByClass(activeClassId);
-  const subs = getSubmissionsByClass(activeClassId);
-  const pending = subs.filter(s => s.status !== "graded").length;
+  const members = membersCache;
+  const as = assignmentsCache;
+  const subs = submissionsCache;
+  const pending = subs.filter((s) => s.status !== "graded").length;
 
   kpiStudents.textContent = members.length.toLocaleString("tr-TR");
   kpiAssignments.textContent = as.length.toLocaleString("tr-TR");
@@ -299,29 +337,36 @@ function renderKPIs(){
   kpiPending.textContent = pending.toLocaleString("tr-TR");
 }
 
-function renderAssignmentList(){
+function renderAssignmentList() {
   assignmentList.innerHTML = "";
+
   if (!activeClassId) {
     emptyAssignments.hidden = false;
     return;
   }
 
-  const as = getAssignmentsByClass(activeClassId)
-    .sort((x,y)=> (y.createdAt||"").localeCompare(x.createdAt||""));
+  const as = (assignmentsCache || []).slice().sort((x, y) =>
+    (y.createdAt || "").localeCompare(x.createdAt || "")
+  );
 
   if (!as.length) {
     emptyAssignments.hidden = false;
     return;
   }
+
   emptyAssignments.hidden = true;
 
-  as.forEach(a => {
+  as.forEach((a) => {
     const el = document.createElement("div");
     el.className = "rowcard";
     el.innerHTML = `
       <div class="leftcol">
         <div class="titleline">${a.course} — ${a.title}</div>
-        <div class="subline">Son: ${a.due ? fmtOnlyDate(a.due) : "—"} • ${a.desc ? a.desc.slice(0, 72) + (a.desc.length>72 ? "…" : "") : ""}</div>
+        <div class="subline">
+          Son: ${a.due ? fmtOnlyDate(a.due) : "—"} • ${
+      a.desc ? a.desc.slice(0, 72) + (a.desc.length > 72 ? "…" : "") : ""
+    }
+        </div>
       </div>
       <span class="pill">Ödev</span>
     `;
@@ -329,24 +374,27 @@ function renderAssignmentList(){
   });
 }
 
-function renderLastSubmissions(){
+function renderLastSubmissions() {
   lastSubmissions.innerHTML = "";
+
   if (!activeClassId) {
     emptyLast.hidden = false;
     return;
   }
 
-  const subs = getSubmissionsByClass(activeClassId)
-    .sort((a,b)=> (b.submittedAt||"").localeCompare(a.submittedAt||""))
+  const subs = (submissionsCache || [])
+    .slice()
+    .sort((a, b) => (b.submittedAt || "").localeCompare(a.submittedAt || ""))
     .slice(0, 4);
 
   if (!subs.length) {
     emptyLast.hidden = false;
     return;
   }
+
   emptyLast.hidden = true;
 
-  subs.forEach(s => {
+  subs.forEach((s) => {
     const el = document.createElement("div");
     el.className = "rowcard";
     el.innerHTML = `
@@ -364,35 +412,39 @@ function renderLastSubmissions(){
   });
 }
 
-function applySubmissionFilters(list){
+function applySubmissionFilters(list) {
   const c = (filterCourse.value || "").trim().toLowerCase();
   const st = filterStatus.value;
 
-  return list.filter(s => {
+  return list.filter((s) => {
     const courseOk = !c || (s.course || "").toLowerCase().includes(c);
-    const statusOk = st === "all" ? true : (s.status === st);
+    const statusOk = st === "all" ? true : s.status === st;
     return courseOk && statusOk;
   });
 }
 
-function renderSubmissionList(){
+function renderSubmissionList() {
   submissionList.innerHTML = "";
+
   if (!activeClassId) {
     emptySubmissions.hidden = false;
     return;
   }
 
-  const all = getSubmissionsByClass(activeClassId)
-    .sort((a,b)=> (b.submittedAt||"").localeCompare(a.submittedAt||""));
+  const all = (submissionsCache || [])
+    .slice()
+    .sort((a, b) => (b.submittedAt || "").localeCompare(a.submittedAt || ""));
+
   const subs = applySubmissionFilters(all);
 
   if (!subs.length) {
     emptySubmissions.hidden = false;
     return;
   }
+
   emptySubmissions.hidden = true;
 
-  subs.forEach(s => {
+  subs.forEach((s) => {
     const el = document.createElement("div");
     el.className = "rowcard";
     el.innerHTML = `
@@ -408,23 +460,26 @@ function renderSubmissionList(){
   });
 }
 
-function renderStudentList(){
+function renderStudentList() {
   studentList.innerHTML = "";
+
   if (!activeClassId) {
     emptyStudents.hidden = false;
     return;
   }
 
-  const members = getMembersByClass(activeClassId)
-    .sort((a,b)=> (a.studentName||"").localeCompare(b.studentName||""));
+  const members = (membersCache || [])
+    .slice()
+    .sort((a, b) => (a.studentName || "").localeCompare(b.studentName || ""));
 
   if (!members.length) {
     emptyStudents.hidden = false;
     return;
   }
+
   emptyStudents.hidden = true;
 
-  members.forEach(m => {
+  members.forEach((m) => {
     const el = document.createElement("div");
     el.className = "rowcard";
     el.style.cursor = "default";
@@ -440,17 +495,17 @@ function renderStudentList(){
 }
 
 // ========= DETAIL =========
-function clearSelection(){
+function clearSelection() {
   selectedSubmissionId = null;
   detailBox.hidden = true;
   detailEmpty.hidden = false;
   clearAlert(reviewAlert);
 }
 
-function selectSubmission(id){
+function selectSubmission(id) {
   if (!activeClassId) return;
-  const subs = getSubmissionsByClass(activeClassId);
-  const s = subs.find(x => x.id === id);
+
+  const s = (submissionsCache || []).find((x) => x.id === id);
   if (!s) return;
 
   selectedSubmissionId = id;
@@ -480,8 +535,10 @@ function selectSubmission(id){
   clearAlert(reviewAlert);
 }
 
-function saveReview(){
+async function saveReview() {
   if (!activeClassId || !selectedSubmissionId) return;
+
+  clearAlert(reviewAlert);
 
   const gradeRaw = gradeInput.value.trim();
   const status = statusInput.value;
@@ -497,66 +554,56 @@ function saveReview(){
     grade = Math.round(n);
   }
 
-  const allTeacherSubs = load(KEY_SUBMISSIONS, []).filter(s => s.teacherId === me.id);
-  const idx = allTeacherSubs.findIndex(x => x.id === selectedSubmissionId);
-  if (idx === -1) return;
+  try {
+    await reviewSubmissionApi({
+      submissionId: selectedSubmissionId,
+      grade,
+      status,
+      feedback,
+    });
 
-  allTeacherSubs[idx] = { ...allTeacherSubs[idx], grade, status, feedback };
-  saveSubmissions(allTeacherSubs);
+    setAlert(reviewAlert, "ok", "Değerlendirme kaydedildi.");
 
-  setAlert(reviewAlert, "ok", "Değerlendirme kaydedildi.");
-  refreshAll();
-  selectSubmission(selectedSubmissionId);
+    // cache refresh
+    await refreshAll(true);
+    selectSubmission(selectedSubmissionId);
+  } catch (err) {
+    console.error(err);
+    setAlert(reviewAlert, "err", err.message || "Kaydedilemedi.");
+  }
 }
 
-// ========= CREATE ASSIGNMENT =========
-function createAssignment(course, title, desc, due){
-  const allTeacherAssignments = load(KEY_ASSIGNMENTS, []).filter(a => a.teacherId === me.id);
-
-  const item = {
-    id: uid("ass"),
-    classId: activeClassId,
-    teacherId: me.id,
-    course: course.trim(),
-    title: title.trim(),
-    desc: (desc || "").trim(),
-    due: due ? new Date(due).toISOString() : "",
-    createdAt: new Date().toISOString()
-  };
-
-  allTeacherAssignments.unshift(item);
-  saveAssignments(allTeacherAssignments);
-}
-
-// ========= CLASS MODALS =========
-function openModal(modalEl){
+// ========= MODALS =========
+function openModal(modalEl) {
   modalEl.classList.add("open");
-  modalEl.setAttribute("aria-hidden","false");
+  modalEl.setAttribute("aria-hidden", "false");
 }
-function closeModal(modalEl){
+function closeModal(modalEl) {
   modalEl.classList.remove("open");
-  modalEl.setAttribute("aria-hidden","true");
+  modalEl.setAttribute("aria-hidden", "true");
 }
-document.querySelectorAll("[data-close]").forEach(btn => {
+document.querySelectorAll("[data-close]").forEach((btn) => {
   btn.addEventListener("click", () => {
     const id = btn.getAttribute("data-close");
     const el = document.getElementById(id);
     if (el) closeModal(el);
   });
 });
-[createClassModal, classInfoModal].forEach(m => {
-  m.addEventListener("click", (e) => { if (e.target === m) closeModal(m); });
+[createClassModal, classInfoModal].forEach((m) => {
+  m.addEventListener("click", (e) => {
+    if (e.target === m) closeModal(m);
+  });
 });
 
 // ========= CLASS ACTIONS =========
-openCreateClass.addEventListener("click", () => {
+openCreateClass?.addEventListener("click", () => {
   clearAlert(classCreateAlert);
   className.value = "";
   classDesc.value = "";
   openModal(createClassModal);
 });
 
-createClassForm.addEventListener("submit", async (e) => {
+createClassForm?.addEventListener("submit", async (e) => {
   e.preventDefault();
   clearAlert(classCreateAlert);
 
@@ -569,15 +616,14 @@ createClassForm.addEventListener("submit", async (e) => {
   }
 
   try {
-    // ✅ backend'e kaydet (öğrenci buradan görecek)
     const data = await apiFetch("/api/classes/create", {
       method: "POST",
       body: JSON.stringify({
         name,
         desc,
         teacherId: me.id,
-        teacherName: me.name || "Öğretmen"
-      })
+        teacherName: me.name || "Öğretmen",
+      }),
     });
 
     const newClass = data?.class;
@@ -594,17 +640,17 @@ createClassForm.addEventListener("submit", async (e) => {
     setActiveClassChip();
 
     setTimeout(() => closeModal(createClassModal), 600);
-    refreshAll();
+    await refreshAll(true);
   } catch (err) {
     console.error(err);
     setAlert(classCreateAlert, "err", err.message || "Sınıf oluşturulamadı.");
   }
 });
 
-openClassInfo.addEventListener("click", () => {
+openClassInfo?.addEventListener("click", () => {
   if (!requireActiveClass()) return;
 
-  const cls = classesCache.find(c => c.id === activeClassId);
+  const cls = classesCache.find((c) => c.id === activeClassId);
   if (!cls) return;
 
   infoClassName.textContent = cls.name;
@@ -615,7 +661,7 @@ openClassInfo.addEventListener("click", () => {
   openModal(classInfoModal);
 });
 
-copyClassCode.addEventListener("click", async () => {
+copyClassCode?.addEventListener("click", async () => {
   const code = infoClassCode.textContent.trim();
   try {
     await navigator.clipboard.writeText(code);
@@ -625,152 +671,126 @@ copyClassCode.addEventListener("click", async () => {
   }
 });
 
+// ========= ASSIGNMENT CREATE =========
+async function onCreateAssignment(course, title, desc, due, alertEl, resetFn) {
+  clearAlert(alertEl);
+  if (!requireActiveClass()) return;
+
+  if (!course.trim() || !title.trim() || !due) {
+    setAlert(alertEl, "err", "Ders, başlık ve son tarih zorunlu.");
+    return;
+  }
+
+  try {
+    await createAssignmentApi({
+      classId: activeClassId,
+      course,
+      title,
+      desc,
+      due,
+    });
+
+    setAlert(alertEl, "ok", "Ödev oluşturuldu.");
+    resetFn?.();
+
+    await refreshAll(true);
+  } catch (err) {
+    console.error(err);
+    setAlert(alertEl, "err", err.message || "Ödev oluşturulamadı.");
+  }
+}
+
+quickAssignmentForm?.addEventListener("submit", (e) => {
+  e.preventDefault();
+  onCreateAssignment(
+    qaCourse.value,
+    qaTitle.value,
+    qaDesc.value,
+    qaDue.value,
+    qaAlert,
+    () => {
+      qaCourse.value = "";
+      qaTitle.value = "";
+      qaDesc.value = "";
+      qaDue.value = "";
+    }
+  );
+});
+
+assignmentForm?.addEventListener("submit", (e) => {
+  e.preventDefault();
+  onCreateAssignment(
+    aCourse.value,
+    aTitle.value,
+    aDesc.value,
+    aDue.value,
+    aAlert,
+    () => {
+      aCourse.value = "";
+      aTitle.value = "";
+      aDesc.value = "";
+      aDue.value = "";
+    }
+  );
+});
+
 // ========= EVENTS =========
 who.textContent = me?.name ? `👨‍🏫 ${me.name}` : "👨‍🏫 Öğretmen";
 
-logoutBtn.addEventListener("click", () => {
+logoutBtn?.addEventListener("click", () => {
   localStorage.removeItem("token");
   localStorage.removeItem("role");
   localStorage.removeItem("user");
   window.location.replace("/Ogretmen/ogretmen-giris.html");
 });
 
-navBtns.forEach(b => b.addEventListener("click", () => setView(b.dataset.view)));
+navBtns.forEach((b) => b.addEventListener("click", () => setView(b.dataset.view)));
 
-classSelect.addEventListener("change", () => {
+classSelect?.addEventListener("change", async () => {
   activeClassId = classSelect.value || null;
   setActiveClassChip();
   clearSelection();
-  refreshAll();
+  await refreshAll(true);
 });
 
-goSubmissions.addEventListener("click", () => setView("submissions"));
+goSubmissions?.addEventListener("click", () => setView("submissions"));
 
-filterCourse.addEventListener("input", () => renderSubmissionList());
-filterStatus.addEventListener("change", () => renderSubmissionList());
+filterCourse?.addEventListener("input", () => renderSubmissionList());
+filterStatus?.addEventListener("change", () => renderSubmissionList());
 
-clearSelectionBtn.addEventListener("click", clearSelection);
-saveReviewBtn.addEventListener("click", saveReview);
-
-quickAssignmentForm.addEventListener("submit", (e) => {
-  e.preventDefault();
-  clearAlert(qaAlert);
-  if (!requireActiveClass()) return;
-
-  const course = qaCourse.value;
-  const title = qaTitle.value;
-  const desc = qaDesc.value;
-  const due = qaDue.value;
-
-  if (!course.trim() || !title.trim() || !due) {
-    setAlert(qaAlert, "err", "Ders, başlık ve son tarih zorunlu.");
-    return;
-  }
-
-  createAssignment(course, title, desc, due);
-  setAlert(qaAlert, "ok", "Ödev oluşturuldu.");
-
-  qaCourse.value = "";
-  qaTitle.value = "";
-  qaDesc.value = "";
-  qaDue.value = "";
-
-  refreshAll();
-});
-
-assignmentForm.addEventListener("submit", (e) => {
-  e.preventDefault();
-  clearAlert(aAlert);
-  if (!requireActiveClass()) return;
-
-  const course = aCourse.value;
-  const title = aTitle.value;
-  const desc = aDesc.value;
-  const due = aDue.value;
-
-  if (!course.trim() || !title.trim() || !due) {
-    setAlert(aAlert, "err", "Ders, başlık ve son tarih zorunlu.");
-    return;
-  }
-
-  createAssignment(course, title, desc, due);
-  setAlert(aAlert, "ok", "Ödev kaydedildi.");
-
-  aCourse.value = "";
-  aTitle.value = "";
-  aDesc.value = "";
-  aDue.value = "";
-
-  refreshAll();
-});
-
-// ========= DEMO: seed teslim (istersen kaldırırız) =========
-function seedDemoIfEmpty(){
-  if (!activeClassId) return;
-
-  const subs = getSubmissionsByClass(activeClassId);
-  if (subs.length) return;
-
-  const as = getAssignmentsByClass(activeClassId);
-  let aId = as[0]?.id;
-
-  if (!aId) {
-    const allTeacherAssignments = load(KEY_ASSIGNMENTS, []).filter(a => a.teacherId === me.id);
-    const demoA = {
-      id: uid("ass"),
-      classId: activeClassId,
-      teacherId: me.id,
-      course: "Matematik",
-      title: "Kareler ve Dikdörtgenler",
-      desc: "Soruları çöz, PDF yükle.",
-      due: new Date(Date.now() + 3*86400000).toISOString(),
-      createdAt: new Date().toISOString()
-    };
-    allTeacherAssignments.unshift(demoA);
-    saveAssignments(allTeacherAssignments);
-    aId = demoA.id;
-  }
-
-  const demoSubs = load(KEY_SUBMISSIONS, []).filter(s => s.teacherId === me.id);
-  demoSubs.unshift(
-    {
-      id: uid("sub"),
-      classId: activeClassId,
-      assignmentId: aId,
-      teacherId: me.id,
-      studentId: "demo_st_1",
-      studentName: "Ali Yılmaz",
-      course: "Matematik",
-      title: "Kareler ve Dikdörtgenler",
-      fileName: "AliYilmaz_Mat_Odev1.pdf",
-      submittedAt: new Date().toISOString(),
-      status: "pending",
-      grade: "",
-      feedback: ""
-    },
-    {
-      id: uid("sub"),
-      classId: activeClassId,
-      assignmentId: aId,
-      teacherId: me.id,
-      studentId: "demo_st_2",
-      studentName: "Ayşe Demir",
-      course: "Matematik",
-      title: "Kareler ve Dikdörtgenler",
-      fileName: "AyseDemir_Mat_Odev1.pdf",
-      submittedAt: new Date(Date.now()-3600*1000).toISOString(),
-      status: "graded",
-      grade: 92,
-      feedback: "Gayet iyi. 3. soruda çözümü biraz daha açıklayabilirsin."
-    }
-  );
-
-  saveSubmissions(demoSubs);
-}
+clearSelectionBtn?.addEventListener("click", clearSelection);
+saveReviewBtn?.addEventListener("click", saveReview);
 
 // ========= REFRESH =========
-function refreshAll(){
+async function refreshAll(fetchFresh = false) {
+  if (!activeClassId) {
+    membersCache = [];
+    assignmentsCache = [];
+    submissionsCache = [];
+    setActiveClassChip();
+    renderKPIs();
+    renderAssignmentList();
+    renderSubmissionList();
+    renderLastSubmissions();
+    renderStudentList();
+    return;
+  }
+
   setActiveClassChip();
+
+  if (fetchFresh) {
+    // paralel çek
+    const [members, assignments, submissions] = await Promise.allSettled([
+      getMembersByClass(activeClassId),
+      getAssignmentsByClass(activeClassId),
+      getSubmissionsByClass(activeClassId),
+    ]);
+
+    membersCache = members.status === "fulfilled" ? members.value : [];
+    assignmentsCache = assignments.status === "fulfilled" ? assignments.value : [];
+    submissionsCache = submissions.status === "fulfilled" ? submissions.value : [];
+  }
+
   renderKPIs();
   renderAssignmentList();
   renderSubmissionList();
@@ -779,16 +799,17 @@ function refreshAll(){
 }
 
 // ========= BOOT =========
-(async function boot(){
+(async function boot() {
   try {
     await fillClassSelect();
   } catch (e) {
     console.error(e);
   }
+
   setActiveClassChip();
   setView("dashboard");
   clearSelection();
 
-  seedDemoIfEmpty();
-  refreshAll();
+  // İlk yüklemede aktif class varsa dataları çek
+  await refreshAll(true);
 })();

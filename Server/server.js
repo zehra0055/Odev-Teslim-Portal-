@@ -4,9 +4,8 @@ require("dotenv").config();
 const express = require("express");
 const cors = require("cors");
 const path = require("path");
-const fs = require("fs");
 
-const { MongoClient } = require("mongodb");
+const { MongoClient, GridFSBucket, ObjectId } = require("mongodb");
 const bcrypt = require("bcrypt");
 const crypto = require("crypto");
 const nodemailer = require("nodemailer");
@@ -41,10 +40,33 @@ app.get("/health", (req, res) => {
 // MongoDB bağlantısı
 // ============================
 const client = new MongoClient(MONGODB_URI);
+
 let db;
+let gfsBucket;
 
 // collections helper
 const col = (name) => db.collection(name);
+
+// ============================
+// Multer (RAM) + FileFilter (PDF/DOCX/ZIP)
+// ============================
+const upload = multer({
+  storage: multer.memoryStorage(),
+  limits: { fileSize: 25 * 1024 * 1024 }, // 25MB
+  fileFilter: (req, file, cb) => {
+    const allowed = [
+      "application/pdf",
+      "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+      "application/zip",
+      "application/x-zip-compressed",
+      "application/octet-stream", // bazı zip/indirilen dosyalar böyle gelebiliyor
+    ];
+    if (!allowed.includes(file.mimetype)) {
+      return cb(new Error("Sadece PDF / DOCX / ZIP yükleyebilirsin."), false);
+    }
+    cb(null, true);
+  },
+});
 
 // ============================
 // Helpers
@@ -121,39 +143,6 @@ const transporter = mailEnabled
 
 const RESET_CODE_TTL_MIN = Number(process.env.RESET_CODE_TTL_MIN || 10);
 const RESET_TOKEN_TTL_MIN = Number(process.env.RESET_TOKEN_TTL_MIN || 15);
-
-// ============================
-// Uploads (PDF/ZIP)
-// ============================
-const uploadDir = path.join(__dirname, "..", "uploads");
-if (!fs.existsSync(uploadDir)) fs.mkdirSync(uploadDir, { recursive: true });
-app.use("/uploads", express.static(uploadDir));
-
-const storage = multer.diskStorage({
-  destination: (req, file, cb) => cb(null, uploadDir),
-  filename: (req, file, cb) => {
-    const ext = path.extname(file.originalname).toLowerCase();
-    const safeBase = path
-      .basename(file.originalname, ext)
-      .replace(/[^a-zA-Z0-9-_]+/g, "_")
-      .slice(0, 60);
-    const unique = `sub_${Date.now()}_${Math.random().toString(16).slice(2)}`;
-    cb(null, `${unique}_${safeBase}${ext}`);
-  },
-});
-
-function fileFilter(req, file, cb) {
-  const ext = path.extname(file.originalname).toLowerCase();
-  const allowed = [".pdf", ".zip"];
-  if (!allowed.includes(ext)) return cb(new Error("Sadece PDF veya ZIP yükleyebilirsin."));
-  cb(null, true);
-}
-
-const upload = multer({
-  storage,
-  fileFilter,
-  limits: { fileSize: 20 * 1024 * 1024 }, // 20MB
-});
 
 // ============================
 // AUTH
@@ -272,7 +261,7 @@ app.post("/api/auth/login", async (req, res) => {
   }
 });
 
-// LOGOUT (client çağırmasa bile olur, ama düzenli)
+// LOGOUT
 app.post("/api/auth/logout", authRequired, async (req, res) => {
   try {
     if (req.token) sessions.delete(req.token);
@@ -282,7 +271,7 @@ app.post("/api/auth/logout", authRequired, async (req, res) => {
   }
 });
 
-// ====== FORGOT: kod gönder ======
+// ====== FORGOT ======
 app.post("/api/auth/forgot", async (req, res) => {
   try {
     const { role, email } = req.body || {};
@@ -334,7 +323,7 @@ app.post("/api/auth/forgot", async (req, res) => {
   }
 });
 
-// ====== VERIFY: kod doğrula -> resetToken ======
+// ====== VERIFY ======
 app.post("/api/auth/reset/verify", async (req, res) => {
   try {
     const { role, email, code } = req.body || {};
@@ -380,7 +369,7 @@ app.post("/api/auth/reset/verify", async (req, res) => {
   }
 });
 
-// ====== RESET: token ile şifreyi değiştir ======
+// ====== RESET ======
 app.post("/api/auth/reset", async (req, res) => {
   try {
     const { role, email, resetToken, newPassword } = req.body || {};
@@ -431,15 +420,14 @@ app.post("/api/auth/reset", async (req, res) => {
 });
 
 // ============================
-// CLASSES + JOIN (classes, class_members)
+// CLASSES + JOIN
 // ============================
 
 // Teacher: sınıf oluştur
 app.post("/api/classes/create", authRequired, async (req, res) => {
   try {
-    if (req.auth.role !== "teacher") {
-      return res.status(403).json({ ok: false, message: "Sadece öğretmen." });
-    }
+    if (req.auth.role !== "teacher") return res.status(403).json({ ok: false, message: "Sadece öğretmen." });
+
     const { name, desc } = req.body || {};
     const n = safeName(name);
     if (!n) return res.status(400).json({ ok: false, message: "Sınıf adı zorunlu." });
@@ -479,8 +467,8 @@ app.post("/api/classes/create", authRequired, async (req, res) => {
 app.get("/api/classes/mine", authRequired, async (req, res) => {
   try {
     if (req.auth.role !== "teacher") return res.status(403).json({ ok: false, message: "Sadece öğretmen." });
-    const teacherId = String(req.query.teacherId || "").trim() || req.auth.userId;
 
+    const teacherId = String(req.query.teacherId || "").trim() || req.auth.userId;
     if (teacherId !== req.auth.userId) return res.status(403).json({ ok: false, message: "Yetkisiz." });
 
     const classes = await col("classes")
@@ -544,9 +532,7 @@ app.get("/api/classes/search-by-teacher", async (req, res) => {
 // Sınıfa katıl (student)
 app.post("/api/classes/join", authRequired, async (req, res) => {
   try {
-    if (req.auth.role !== "student") {
-      return res.status(403).json({ ok: false, message: "Sadece öğrenci katılabilir." });
-    }
+    if (req.auth.role !== "student") return res.status(403).json({ ok: false, message: "Sadece öğrenci katılabilir." });
 
     const { classId, studentName } = req.body || {};
     if (!classId) return res.status(400).json({ ok: false, message: "classId gerekli." });
@@ -610,7 +596,6 @@ app.post("/api/assignments/create", authRequired, async (req, res) => {
     const { classId, course, title, desc, due } = req.body || {};
     if (!classId || !course || !title || !due) return res.status(400).json({ ok: false, message: "Eksik alan var." });
 
-    // öğretmen bu sınıfın sahibi mi?
     const cls = await col("classes").findOne({ id: classId }, { projection: { _id: 0 } });
     if (!cls) return res.status(404).json({ ok: false, message: "Sınıf bulunamadı." });
     if (cls.teacherId !== req.auth.userId) return res.status(403).json({ ok: false, message: "Yetkisiz." });
@@ -653,70 +638,102 @@ app.get("/api/assignments/by-class", authRequired, async (req, res) => {
 });
 
 // ============================
-// SUBMISSIONS (Upload + Lists + Review)
+// SUBMISSIONS (GridFS Upload + Lists + Review)
 // ============================
 
-// Student: upload submission
+// Student: upload submission (GridFS)
 app.post("/api/submissions/upload", authRequired, upload.single("file"), async (req, res) => {
   try {
     if (req.auth.role !== "student") {
       return res.status(403).json({ ok: false, message: "Sadece öğrenci teslim edebilir." });
     }
+    if (!gfsBucket) return res.status(500).json({ ok: false, message: "GridFS hazır değil." });
 
     const { classId, assignmentId, teacherId, studentName, course, title, studentNote } = req.body || {};
     if (!req.file) return res.status(400).json({ ok: false, message: "Dosya zorunlu." });
-    if (!classId || !assignmentId || !teacherId) {
-      return res.status(400).json({ ok: false, message: "Eksik alan var." });
-    }
+    if (!classId || !assignmentId || !teacherId) return res.status(400).json({ ok: false, message: "Eksik alan var." });
 
-    // tekrar teslim engeli (isteğe bağlı)
+    // tekrar teslim engeli
     const exists = await col("submissions").findOne({
       classId,
       assignmentId,
       studentId: req.auth.userId,
     });
-    if (exists) {
-      // dosyayı da çöpe at (boşuna dolmasın)
-      try { fs.unlinkSync(path.join(uploadDir, req.file.filename)); } catch {}
-      return res.status(409).json({ ok: false, message: "Bu ödeve zaten teslim yaptın." });
-    }
+    if (exists) return res.status(409).json({ ok: false, message: "Bu ödeve zaten teslim yaptın." });
 
-    const item = {
-      id: makeId("sub"),
-      classId,
-      assignmentId,
-      teacherId,
-      studentId: req.auth.userId,
-      studentName: safeName(studentName) || "Öğrenci",
-      course: course || "",
-      title: title || "",
-      studentNote: studentNote || "",
-      submittedAt: new Date().toISOString(),
-      status: "pending",
-      grade: "",
-      feedback: "",
+    const safeOriginal = String(req.file.originalname || "dosya").replace(/[^\w.\-() ]+/g, "_");
 
-      originalFileName: req.file.originalname,
-      storedFileName: req.file.filename,
-      filePath: `/uploads/${req.file.filename}`, // ✅ frontend bunu linkte kullanıyor
-      size: req.file.size,
-      mimeType: req.file.mimetype,
-    };
+    const up = gfsBucket.openUploadStream(safeOriginal, {
+      contentType: req.file.mimetype,
+      metadata: { classId, assignmentId, teacherId, studentId: req.auth.userId },
+    });
 
-    await col("submissions").insertOne(item);
-    res.json({ ok: true, submission: item });
+    up.end(req.file.buffer);
+
+    up.on("error", (err) => {
+      console.error("GRIDFS UPLOAD ERROR:", err);
+      res.status(500).json({ ok: false, message: "Dosya yükleme hatası." });
+    });
+
+    up.on("finish", async (file) => {
+      const item = {
+        id: makeId("sub"),
+        classId,
+        assignmentId,
+        teacherId,
+        studentId: req.auth.userId,
+        studentName: safeName(studentName) || "Öğrenci",
+        course: course || "",
+        title: title || "",
+        studentNote: studentNote || "",
+        submittedAt: new Date().toISOString(),
+        status: "pending",
+        grade: "",
+        feedback: "",
+
+        fileId: file._id,
+        originalFileName: req.file.originalname,
+        storedFileName: file.filename,
+        size: file.length,
+        mimeType: req.file.mimetype,
+        fileUrl: `/api/files/${file._id}`,
+      };
+
+      await col("submissions").insertOne(item);
+      res.json({ ok: true, submission: item });
+    });
   } catch (err) {
     console.error("UPLOAD ERROR:", err);
     res.status(500).json({ ok: false, message: err.message || "Upload başarısız." });
   }
 });
 
+// File download (GridFS)
+app.get("/api/files/:fileId", async (req, res) => {
+  try {
+    if (!gfsBucket) return res.status(500).send("GridFS hazır değil.");
+
+    const fileId = new ObjectId(req.params.fileId);
+
+    const files = await db.collection("submissions.files").find({ _id: fileId }).toArray();
+    if (!files.length) return res.status(404).send("Dosya bulunamadı.");
+
+    const file = files[0];
+    res.setHeader("Content-Type", file.contentType || "application/octet-stream");
+    res.setHeader("Content-Disposition", `attachment; filename="${file.filename}"`);
+
+    gfsBucket.openDownloadStream(fileId).pipe(res);
+  } catch (err) {
+    console.error("FILE DOWNLOAD ERROR:", err);
+    res.status(400).send("Geçersiz fileId.");
+  }
+});
+
 // Teacher: class submissions
 app.get("/api/teacher/submissions", authRequired, async (req, res) => {
   try {
-    if (req.auth.role !== "teacher") {
-      return res.status(403).json({ ok: false, message: "Sadece öğretmen." });
-    }
+    if (req.auth.role !== "teacher") return res.status(403).json({ ok: false, message: "Sadece öğretmen." });
+
     const classId = String(req.query.classId || "").trim();
     if (!classId) return res.json({ ok: true, submissions: [] });
 
@@ -775,10 +792,7 @@ app.post("/api/teacher/submissions/review", authRequired, async (req, res) => {
     const st = status === "graded" ? "graded" : "pending";
     const fb = safeName(feedback);
 
-    await col("submissions").updateOne(
-      { id: submissionId },
-      { $set: { status: st, grade: gradeVal, feedback: fb } }
-    );
+    await col("submissions").updateOne({ id: submissionId }, { $set: { status: st, grade: gradeVal, feedback: fb } });
 
     res.json({ ok: true });
   } catch (err) {
@@ -802,6 +816,10 @@ async function start() {
     db = client.db(DB_NAME);
     app.locals.db = db;
 
+    // GridFS init
+    gfsBucket = new GridFSBucket(db, { bucketName: "submissions" });
+    console.log("✅ GridFS ready: submissions");
+
     // indexes
     await col("users").createIndex({ email: 1 }, { unique: true });
     await col("classes").createIndex({ code: 1 }, { unique: true });
@@ -814,7 +832,6 @@ async function start() {
 
     app.listen(PORT, () => {
       console.log(`🚀 Server çalışıyor: http://localhost:${PORT}`);
-      console.log(`📁 Uploads: http://localhost:${PORT}/uploads/<dosya>`);
     });
   } catch (err) {
     console.error("❌ START ERROR:", err);

@@ -23,7 +23,7 @@
 
       <div class="top-actions">
         <div class="who" id="who">👨‍🏫 Öğretmen</div>
-        <button class="btn ghost" id="logoutBtn">Çıkış</button>
+        <button class="btn ghost" id="logoutBtn" type="button">Çıkış</button>
       </div>
     </div>
   </header>
@@ -37,22 +37,27 @@
 
         <div class="class-picker">
           <label class="lab" for="classSelect">Sınıf Seç</label>
-          <select id="classSelect"></select>
+
+          <!-- ✅ default option -->
+          <select id="classSelect">
+            <option value="">Yükleniyor...</option>
+          </select>
+
           <div class="hint" id="classHint">Sınıf seçince her şey ona göre filtrelenir.</div>
         </div>
 
         <div class="class-actions">
-          <button class="btn primary" id="openCreateClass">➕ Yeni Sınıf</button>
-          <button class="btn ghost" id="openClassInfo">🔎 Kod / Bilgi</button>
+          <button class="btn primary" id="openCreateClass" type="button">➕ Yeni Sınıf</button>
+          <button class="btn ghost" id="openClassInfo" type="button">🔎 Kod / Bilgi</button>
         </div>
 
         <div class="split"></div>
 
-        <div class="nav">
-          <button class="navbtn active" data-view="dashboard">📊 Dashboard</button>
-          <button class="navbtn" data-view="assignments">📌 Ödevler</button>
-          <button class="navbtn" data-view="submissions">📥 Teslimler</button>
-          <button class="navbtn" data-view="students">👥 Öğrenciler</button>
+        <div class="nav" role="navigation" aria-label="Panel menüsü">
+          <button class="navbtn active" data-view="dashboard" type="button">📊 Dashboard</button>
+          <button class="navbtn" data-view="assignments" type="button">📌 Ödevler</button>
+          <button class="navbtn" data-view="submissions" type="button">📥 Teslimler</button>
+          <button class="navbtn" data-view="students" type="button">👥 Öğrenciler</button>
         </div>
 
         <div class="mini">
@@ -134,7 +139,7 @@
             <div class="list" id="lastSubmissions"></div>
             <div class="empty" id="emptyLast" hidden>Henüz teslim yok.</div>
 
-            <button class="btn ghost block" id="goSubmissions">Teslimler sayfasına git</button>
+            <button class="btn ghost block" id="goSubmissions" type="button">Teslimler sayfasına git</button>
           </div>
         </div>
       </section>
@@ -315,7 +320,7 @@
     <div class="modal-card" role="dialog" aria-modal="true" aria-labelledby="createClassTitle">
       <div class="modal-top">
         <div class="modal-title" id="createClassTitle">Yeni Sınıf Oluştur</div>
-        <button class="icon-btn" data-close="createClassModal" aria-label="Kapat">✕</button>
+        <button class="icon-btn" data-close="createClassModal" aria-label="Kapat" type="button">✕</button>
       </div>
 
       <form id="createClassForm" class="form">
@@ -340,7 +345,7 @@
     <div class="modal-card" role="dialog" aria-modal="true" aria-labelledby="classInfoTitle">
       <div class="modal-top">
         <div class="modal-title" id="classInfoTitle">Sınıf Bilgisi</div>
-        <button class="icon-btn" data-close="classInfoModal" aria-label="Kapat">✕</button>
+        <button class="icon-btn" data-close="classInfoModal" aria-label="Kapat" type="button">✕</button>
       </div>
 
       <div class="info-box">
@@ -357,12 +362,13 @@
           <div class="info-v" id="infoClassDesc">—</div>
         </div>
 
-        <button class="btn ghost block" id="copyClassCode">Kodu Kopyala</button>
+        <button class="btn ghost block" id="copyClassCode" type="button">Kodu Kopyala</button>
         <div class="alert" id="copyAlert" hidden></div>
       </div>
     </div>
   </div>
 
-  <script src="ogretmen.js"></script>
+  
+  <script src="ogretmen.js" defer></script>
 </body>
 </html>

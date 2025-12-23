@@ -1,34 +1,50 @@
+// public/Ogrenci/ogrenci-panel.js
 "use strict";
 
 /**
- * ✅ ÖĞRENCİ PANEL JS (NEW AUTH + BACKEND CLASSES)
+ * ✅ ÖĞRENCİ PANEL (FULL BACKEND + UPLOAD)
  * - Auth: localStorage -> token, role, user
- * - Classes: BACKEND (search/join/my)
- * - Assignments/Submissions: Şimdilik localStorage (otp_assignments, otp_submissions)
- *   (istersen onları da API'ye taşırız)
+ * - Classes: API
+ * - Assignments: API
+ * - Submissions: API + Upload (pdf/zip)
+ *
+ * ✅ Server uyumu:
+ * - POST /api/submissions/create  (multipart/form-data)
+ * - uploads static: /uploads/...
  */
 
-// ========= STORAGE KEYS =========
-const KEY_CLASS_MEMBERS = "otp_class_members";   // (fallback/demo) {id, classId, studentId, studentName, joinedAt}
-const KEY_ASSIGNMENTS = "otp_assignments";       // {id, classId, teacherId, course, title, desc, due, createdAt}
-const KEY_SUBMISSIONS = "otp_submissions";       // {id, classId, assignmentId, teacherId, studentId, studentName, course, title, fileName, studentNote, submittedAt, status, grade, feedback}
+const API_BASE = "";
+
+// ========= auth guard =========
+const token = localStorage.getItem("token");
+const role = localStorage.getItem("role");
+let me = null;
+try { me = JSON.parse(localStorage.getItem("user") || "null"); } catch { me = null; }
+
+if (!token || role !== "student" || !me) {
+  window.location.replace("/Ogrenci/ogrenci-giris.html");
+}
+
+// ========= apiFetch (FormData safe) =========
+async function apiFetch(path, options = {}) {
+  const headers = { ...(options.headers || {}) };
+  const isFormData = options.body instanceof FormData;
+
+  // FormData'da Content-Type set etmiyoruz
+  if (!isFormData && !headers["Content-Type"]) headers["Content-Type"] = "application/json";
+  if (token) headers["Authorization"] = `Bearer ${token}`;
+
+  const res = await fetch(API_BASE + path, { ...options, headers });
+  let data = null;
+  try { data = await res.json(); } catch {}
+
+  if (!res.ok) throw new Error(data?.message || `İstek başarısız: ${res.status}`);
+  return data;
+}
 
 // ========= helpers =========
-function load(key, fallback){
-  try { const v = localStorage.getItem(key); return v ? JSON.parse(v) : fallback; }
-  catch { return fallback; }
-}
-function save(key, value){ localStorage.setItem(key, JSON.stringify(value)); }
-
-function uid(prefix="id"){
-  return `${prefix}_${Math.random().toString(16).slice(2)}_${Date.now()}`;
-}
-function fmtDate(iso){
-  try { return new Date(iso).toLocaleString("tr-TR"); } catch { return iso; }
-}
-function fmtOnlyDate(iso){
-  try { return new Date(iso).toLocaleDateString("tr-TR"); } catch { return iso; }
-}
+function fmtDate(iso){ try { return new Date(iso).toLocaleString("tr-TR"); } catch { return iso; } }
+function fmtOnlyDate(iso){ try { return new Date(iso).toLocaleDateString("tr-TR"); } catch { return iso; } }
 function setAlert(el, type, text){
   if (!el) return;
   el.hidden = false;
@@ -45,39 +61,6 @@ function clearAlert(el){
 function pillForStatus(s){
   if (s === "graded") return `<span class="pill ok">Notlandırıldı</span>`;
   return `<span class="pill warn">Bekliyor</span>`;
-}
-
-// ========= auth guard (NEW) =========
-const token = localStorage.getItem("token");
-const role = localStorage.getItem("role");
-let me = null;
-
-try { me = JSON.parse(localStorage.getItem("user") || "null"); }
-catch { me = null; }
-
-if (!token || role !== "student" || !me) {
-  window.location.replace("/Ogrenci/ogrenci-giris.html");
-}
-
-// ========= API =========
-const API_BASE = ""; // same origin
-
-async function apiFetch(path, options = {}) {
-  const headers = {
-    "Content-Type": "application/json",
-    ...(options.headers || {})
-  };
-  if (token) headers["Authorization"] = `Bearer ${token}`;
-
-  const res = await fetch(API_BASE + path, { ...options, headers });
-  let data = null;
-  try { data = await res.json(); } catch {}
-
-  if (!res.ok) {
-    const msg = data?.message || `İstek başarısız: ${res.status}`;
-    throw new Error(msg);
-  }
-  return data;
 }
 
 // ========= DOM =========
@@ -120,7 +103,7 @@ const emptyAssignments = document.getElementById("emptyAssignments");
 const assignmentSelect = document.getElementById("assignmentSelect");
 const emptyAssignSelect = document.getElementById("emptyAssignSelect");
 const submitForm = document.getElementById("submitForm");
-const fileName = document.getElementById("fileName");
+const fileInput = document.getElementById("fileInput"); // ✅ <input type="file" id="fileInput" ...>
 const studentNote = document.getElementById("studentNote");
 const submitAlert = document.getElementById("submitAlert");
 
@@ -149,7 +132,7 @@ const joinForm = document.getElementById("joinForm");
 const classCode = document.getElementById("classCode");
 const joinAlert = document.getElementById("joinAlert");
 
-// Find modal (teacher name)
+// Find modal
 const openFind = document.getElementById("openFind");
 const findModal = document.getElementById("findModal");
 const teacherQuery = document.getElementById("teacherQuery");
@@ -162,35 +145,26 @@ const findAlert = document.getElementById("findAlert");
 let activeClassId = null;
 let selectedSubmissionId = null;
 
-// ✅ Backend'den gelen sınıflar cache
 let myClassesCache = [];
+let assignmentsCache = [];
+let mySubmissionsCache = [];
 
-// ========= DATA (CLASSES via API) =========
+// ========= API data =========
 async function fetchMyClasses(){
   const data = await apiFetch(`/api/classes/my?studentId=${encodeURIComponent(me.id)}`);
-  const list = Array.isArray(data?.classes) ? data.classes : [];
-  return list;
+  return Array.isArray(data?.classes) ? data.classes : [];
 }
 
-function myClasses(){
-  return myClassesCache;
+// ⚠️ Endpoint adın farklıysa sadece burayı değiştir
+async function fetchAssignments(classId){
+  const data = await apiFetch(`/api/assignments/by-class?classId=${encodeURIComponent(classId)}`);
+  return Array.isArray(data?.assignments) ? data.assignments : [];
 }
 
-// ========= DATA (Assignments/Submissions localStorage for now) =========
-function getAssignmentsByClass(classId){
-  const all = load(KEY_ASSIGNMENTS, []);
-  return all.filter(a => a.classId === classId);
-}
-function getMySubmissionsByClass(classId){
-  const all = load(KEY_SUBMISSIONS, []);
-  return all.filter(s => s.classId === classId && s.studentId === me.id);
-}
-function getMySubmissionByAssignment(classId, assignmentId){
-  const subs = getMySubmissionsByClass(classId);
-  return subs.find(s => s.assignmentId === assignmentId);
-}
-function saveSubmissions(all){
-  save(KEY_SUBMISSIONS, all);
+// ⚠️ Endpoint adın farklıysa sadece burayı değiştir
+async function fetchMySubmissions(classId){
+  const data = await apiFetch(`/api/student/submissions?classId=${encodeURIComponent(classId)}`);
+  return Array.isArray(data?.submissions) ? data.submissions : [];
 }
 
 // ========= UI =========
@@ -200,7 +174,7 @@ function setView(name){
 }
 
 function setActiveClassChip(){
-  const cls = myClasses().find(c => c.id === activeClassId);
+  const cls = myClassesCache.find(c => c.id === activeClassId);
   const label = cls ? `Sınıf: ${cls.name}` : "Sınıf: —";
   if (activeClassChip) activeClassChip.textContent = label;
   if (assClassChip) assClassChip.textContent = label;
@@ -213,10 +187,9 @@ async function fillClassSelect(){
   classSelect.innerHTML = "";
 
   try {
-    myClassesCache = (await fetchMyClasses())
-      .sort((a,b)=> (a.createdAt||"").localeCompare(b.createdAt||""));
-  } catch (err) {
-    console.error(err);
+    myClassesCache = (await fetchMyClasses()).sort((a,b)=> (a.createdAt||"").localeCompare(b.createdAt||""));
+  } catch (e) {
+    console.error(e);
     myClassesCache = [];
   }
 
@@ -232,7 +205,6 @@ async function fillClassSelect(){
   }
 
   classSelect.disabled = false;
-
   myClassesCache.forEach(c => {
     const opt = document.createElement("option");
     opt.value = c.id;
@@ -255,10 +227,9 @@ function requireActiveClass(){
   return true;
 }
 
-// ========= RENDER =========
+// ========= render =========
 function renderKPIs(){
-  const myCls = myClasses();
-  if (kpiMyClasses) kpiMyClasses.textContent = myCls.length.toLocaleString("tr-TR");
+  if (kpiMyClasses) kpiMyClasses.textContent = myClassesCache.length.toLocaleString("tr-TR");
 
   if (!activeClassId) {
     if (kpiActiveAssignments) kpiActiveAssignments.textContent = "0";
@@ -267,30 +238,25 @@ function renderKPIs(){
     return;
   }
 
-  const as = getAssignmentsByClass(activeClassId);
-  const subs = getMySubmissionsByClass(activeClassId);
-  const graded = subs.filter(s => s.status === "graded").length;
+  const graded = mySubmissionsCache.filter(s => s.status === "graded").length;
 
-  if (kpiActiveAssignments) kpiActiveAssignments.textContent = as.length.toLocaleString("tr-TR");
-  if (kpiMySubmissions) kpiMySubmissions.textContent = subs.length.toLocaleString("tr-TR");
+  if (kpiActiveAssignments) kpiActiveAssignments.textContent = assignmentsCache.length.toLocaleString("tr-TR");
+  if (kpiMySubmissions) kpiMySubmissions.textContent = mySubmissionsCache.length.toLocaleString("tr-TR");
   if (kpiGraded) kpiGraded.textContent = graded.toLocaleString("tr-TR");
 }
 
 function renderUpcoming(){
   if (!upcomingList || !emptyUpcoming) return;
-
   upcomingList.innerHTML = "";
+
   if (!activeClassId) { emptyUpcoming.hidden = false; return; }
 
-  const as = getAssignmentsByClass(activeClassId)
-    .sort((a,b)=> (a.due||"").localeCompare(b.due||""))
-    .slice(0, 5);
-
+  const as = [...assignmentsCache].sort((a,b)=> (a.due||"").localeCompare(b.due||"")).slice(0,5);
   if (!as.length) { emptyUpcoming.hidden = false; return; }
   emptyUpcoming.hidden = true;
 
   as.forEach(a => {
-    const mySub = getMySubmissionByAssignment(activeClassId, a.id);
+    const mySub = mySubmissionsCache.find(s => s.assignmentId === a.id);
     const statusPill = mySub ? pillForStatus(mySub.status) : `<span class="pill">Teslim yok</span>`;
 
     const el = document.createElement("div");
@@ -314,24 +280,22 @@ function renderUpcoming(){
 
 function renderMyLastSubs(){
   if (!myLastSubs || !emptyMyLast) return;
-
   myLastSubs.innerHTML = "";
+
   if (!activeClassId) { emptyMyLast.hidden = false; return; }
 
-  const subs = getMySubmissionsByClass(activeClassId)
-    .sort((a,b)=> (b.submittedAt||"").localeCompare(a.submittedAt||""))
-    .slice(0, 4);
-
+  const subs = [...mySubmissionsCache].sort((a,b)=> (b.submittedAt||"").localeCompare(a.submittedAt||"")).slice(0,4);
   if (!subs.length) { emptyMyLast.hidden = false; return; }
   emptyMyLast.hidden = true;
 
   subs.forEach(s => {
+    const shownName = s.file?.originalName || s.fileName || "Dosya";
     const el = document.createElement("div");
     el.className = "rowcard";
     el.innerHTML = `
       <div class="leftcol">
         <div class="titleline">${s.course} • ${s.title}</div>
-        <div class="subline">${s.fileName} • ${fmtDate(s.submittedAt)}</div>
+        <div class="subline">${shownName} • ${fmtDate(s.submittedAt)}</div>
       </div>
       ${pillForStatus(s.status)}
     `;
@@ -345,18 +309,16 @@ function renderMyLastSubs(){
 
 function renderAssignments(){
   if (!assignmentList || !emptyAssignments) return;
-
   assignmentList.innerHTML = "";
+
   if (!activeClassId) { emptyAssignments.hidden = false; return; }
 
-  const as = getAssignmentsByClass(activeClassId)
-    .sort((a,b)=> (b.createdAt||"").localeCompare(a.createdAt||""));
-
+  const as = [...assignmentsCache].sort((a,b)=> (b.createdAt||"").localeCompare(a.createdAt||""));
   if (!as.length) { emptyAssignments.hidden = false; return; }
   emptyAssignments.hidden = true;
 
   as.forEach(a => {
-    const mySub = getMySubmissionByAssignment(activeClassId, a.id);
+    const mySub = mySubmissionsCache.find(s => s.assignmentId === a.id);
     const statusPill = mySub ? pillForStatus(mySub.status) : `<span class="pill">Teslim yok</span>`;
 
     const el = document.createElement("div");
@@ -380,17 +342,15 @@ function renderAssignments(){
 
 function fillAssignmentSelect(){
   if (!assignmentSelect || !emptyAssignSelect) return;
-
   assignmentSelect.innerHTML = "";
+
   if (!activeClassId) {
     emptyAssignSelect.hidden = false;
     assignmentSelect.disabled = true;
     return;
   }
 
-  const as = getAssignmentsByClass(activeClassId)
-    .sort((a,b)=> (a.due||"").localeCompare(b.due||""));
-
+  const as = [...assignmentsCache].sort((a,b)=> (a.due||"").localeCompare(b.due||""));
   if (!as.length) {
     emptyAssignSelect.hidden = false;
     assignmentSelect.disabled = true;
@@ -417,18 +377,13 @@ function fillSubmitPanel(){
   const aId = assignmentSelect.value;
   if (!aId) return;
 
-  const as = getAssignmentsByClass(activeClassId);
-  const a = as.find(x => x.id === aId);
-  if (!a) return;
-
-  const prev = getMySubmissionByAssignment(activeClassId, aId);
-  if (prev) setAlert(submitAlert, "err", "Bu ödeve zaten teslim yaptın. (Demo: tekrar teslim kapalı)");
+  const prev = mySubmissionsCache.find(s => s.assignmentId === aId);
+  if (prev) setAlert(submitAlert, "err", "Bu ödeve zaten teslim yaptın. (Tekrar teslim kapalı)");
 }
 
 function applyHistoryFilters(list){
   const c = (filterCourse?.value || "").trim().toLowerCase();
-  const st = filterStatus?.value;
-
+  const st = filterStatus?.value || "all";
   return list.filter(s => {
     const courseOk = !c || (s.course || "").toLowerCase().includes(c);
     const statusOk = st === "all" ? true : (s.status === st);
@@ -438,24 +393,22 @@ function applyHistoryFilters(list){
 
 function renderHistory(){
   if (!historyList || !emptyHistory) return;
-
   historyList.innerHTML = "";
+
   if (!activeClassId) { emptyHistory.hidden = false; return; }
 
-  const all = getMySubmissionsByClass(activeClassId)
-    .sort((a,b)=> (b.submittedAt||"").localeCompare(a.submittedAt||""));
-  const subs = applyHistoryFilters(all);
-
+  const subs = applyHistoryFilters([...mySubmissionsCache].sort((a,b)=> (b.submittedAt||"").localeCompare(a.submittedAt||"")));
   if (!subs.length) { emptyHistory.hidden = false; return; }
   emptyHistory.hidden = true;
 
   subs.forEach(s => {
+    const shownName = s.file?.originalName || s.fileName || "Dosya";
     const el = document.createElement("div");
     el.className = "rowcard";
     el.innerHTML = `
       <div class="leftcol">
         <div class="titleline">${s.course} • ${s.title}</div>
-        <div class="subline">${s.fileName} • ${fmtDate(s.submittedAt)}</div>
+        <div class="subline">${shownName} • ${fmtDate(s.submittedAt)}</div>
       </div>
       ${pillForStatus(s.status)}
     `;
@@ -464,7 +417,7 @@ function renderHistory(){
   });
 }
 
-// ========= DETAIL (History) =========
+// ========= detail =========
 function clearSelection(){
   selectedSubmissionId = null;
   if (detailBox) detailBox.hidden = true;
@@ -472,13 +425,10 @@ function clearSelection(){
 }
 
 function selectHistorySubmission(id){
-  if (!activeClassId) return;
-  const subs = getMySubmissionsByClass(activeClassId);
-  const s = subs.find(x => x.id === id);
+  const s = mySubmissionsCache.find(x => x.id === id);
   if (!s) return;
 
   selectedSubmissionId = id;
-
   if (detailEmpty) detailEmpty.hidden = true;
   if (detailBox) detailBox.hidden = false;
 
@@ -486,22 +436,26 @@ function selectHistorySubmission(id){
   if (dSub) dSub.textContent = `Durum: ${s.status === "graded" ? "Notlandırıldı" : "Bekliyor"}`;
 
   if (dStatus) {
-    if (s.status === "graded") {
-      dStatus.textContent = "Notlandırıldı";
-      dStatus.className = "pill ok";
+    dStatus.textContent = s.status === "graded" ? "Notlandırıldı" : "Bekliyor";
+    dStatus.className = s.status === "graded" ? "pill ok" : "pill warn";
+  }
+
+  // ✅ server.js uyumlu: submission.file.url
+  if (dFile) {
+    if (s.file?.url) {
+      const text = s.file.originalName || "Dosyayı aç";
+      dFile.innerHTML = `<a href="${s.file.url}" target="_blank" rel="noopener">${text}</a>`;
     } else {
-      dStatus.textContent = "Bekliyor";
-      dStatus.className = "pill warn";
+      dFile.textContent = s.fileName || "—";
     }
   }
 
-  if (dFile) dFile.textContent = s.fileName;
   if (dDate) dDate.textContent = fmtDate(s.submittedAt);
   if (dGrade) dGrade.textContent = (s.grade === "" || s.grade === null || typeof s.grade === "undefined") ? "—" : String(s.grade);
   if (dFeedback) dFeedback.textContent = s.feedback ? s.feedback : "—";
 }
 
-// ========= MODALS =========
+// ========= modals =========
 function openModal(modalEl){
   if (!modalEl) return;
   modalEl.classList.add("open");
@@ -524,25 +478,19 @@ document.querySelectorAll("[data-close]").forEach(btn => {
   m.addEventListener("click", (e) => { if (e.target === m) closeModal(m); });
 });
 
-// ========= JOIN / SEARCH =========
+// ========= join/search =========
 async function joinByCode(codeRaw){
   const code = (codeRaw || "").trim().toUpperCase();
   if (code.length !== 6) return { ok:false, msg:"Kod 6 haneli olmalı." };
 
-  // ✅ önce sınıfı backend'den bul
   try {
     const data = await apiFetch(`/api/classes/search?code=${encodeURIComponent(code)}`);
     const cls = data?.class;
     if (!cls?.id) return { ok:false, msg:"Bu kodla sınıf bulunamadı." };
 
-    // ✅ backend'e join at
     await apiFetch(`/api/classes/join`, {
       method: "POST",
-      body: JSON.stringify({
-        classId: cls.id,
-        studentId: me.id,
-        studentName: me.name || "Öğrenci"
-      })
+      body: JSON.stringify({ classId: cls.id, studentName: me.name || "Öğrenci" })
     });
 
     return { ok:true, msg:`Katıldın: ${cls.name}` };
@@ -567,10 +515,7 @@ function renderFoundClasses(classes){
   if (!foundClassList || !emptyFound) return;
 
   foundClassList.innerHTML = "";
-  if (!classes.length) {
-    emptyFound.hidden = false;
-    return;
-  }
+  if (!classes.length) { emptyFound.hidden = false; return; }
   emptyFound.hidden = true;
 
   classes.forEach(cls => {
@@ -586,105 +531,98 @@ function renderFoundClasses(classes){
     `;
     el.addEventListener("click", async () => {
       clearAlert(findAlert);
-      const res = await joinByCode(cls.code); // en güvenlisi: kod ile join
-      if (!res.ok) {
-        setAlert(findAlert, "err", res.msg);
-        return;
-      }
-      setAlert(findAlert, "ok", res.msg);
+      const res = await joinByCode(cls.code);
+      if (!res.ok) return setAlert(findAlert, "err", res.msg);
 
+      setAlert(findAlert, "ok", res.msg);
       await fillClassSelect();
-      // aktif sınıfı yeni katıldığına çevir
-      const fresh = myClasses().find(x => x.id === cls.id);
+
+      const fresh = myClassesCache.find(x => x.id === cls.id);
       if (fresh) {
         activeClassId = fresh.id;
         if (classSelect) classSelect.value = activeClassId;
       }
-      setActiveClassChip();
-      refreshAll();
 
+      await refreshAll();
       setTimeout(() => closeModal(findModal), 500);
     });
     foundClassList.appendChild(el);
   });
 }
 
-// ========= SUBMIT =========
-function submitAssignment(){
+// ========= submit upload (SERVER.JS UYUMLU) =========
+async function submitAssignment(){
   clearAlert(submitAlert);
   if (!requireActiveClass()) return;
 
   const aId = assignmentSelect?.value;
-  if (!aId) {
-    setAlert(submitAlert, "err", "Ödev seçmelisin.");
-    return;
+  if (!aId) return setAlert(submitAlert, "err", "Ödev seçmelisin.");
+
+  const a = assignmentsCache.find(x => x.id === aId);
+  if (!a) return setAlert(submitAlert, "err", "Ödev bulunamadı.");
+
+  const prev = mySubmissionsCache.find(s => s.assignmentId === aId);
+  if (prev) return setAlert(submitAlert, "err", "Bu ödeve zaten teslim yaptın. (Tekrar teslim kapalı)");
+
+  const file = fileInput?.files?.[0];
+  if (!file) return setAlert(submitAlert, "err", "Dosya seçmelisin (PDF/ZIP).");
+
+  const ext = (file.name.split(".").pop() || "").toLowerCase();
+  if (!["pdf", "zip"].includes(ext)) return setAlert(submitAlert, "err", "Sadece PDF veya ZIP yükleyebilirsin.");
+
+  const fd = new FormData();
+  fd.append("file", file);
+
+  // ✅ server beklediği alanlar:
+  fd.append("classId", activeClassId);
+  fd.append("assignmentId", a.id);
+  fd.append("teacherId", a.teacherId);
+  fd.append("studentId", me.id);
+  fd.append("studentName", me.name || "Öğrenci");
+  fd.append("studentNote", (studentNote?.value || "").trim());
+
+  try {
+    // ✅ server.js route: /api/submissions/create
+    await apiFetch("/api/submissions/create", { method: "POST", body: fd });
+
+    setAlert(submitAlert, "ok", "Teslim edildi! ✅");
+
+    if (fileInput) fileInput.value = "";
+    if (studentNote) studentNote.value = "";
+
+    await refreshAll();
+  } catch (err) {
+    setAlert(submitAlert, "err", err.message || "Teslim başarısız.");
   }
-
-  const as = getAssignmentsByClass(activeClassId);
-  const a = as.find(x => x.id === aId);
-  if (!a) {
-    setAlert(submitAlert, "err", "Ödev bulunamadı.");
-    return;
-  }
-
-  // tekrar teslim kapalı (demo)
-  const prev = getMySubmissionByAssignment(activeClassId, aId);
-  if (prev) {
-    setAlert(submitAlert, "err", "Bu ödeve zaten teslim yaptın. (Demo: tekrar teslim kapalı)");
-    return;
-  }
-
-  const f = (fileName?.value || "").trim();
-  const note = (studentNote?.value || "").trim();
-  if (!f) {
-    setAlert(submitAlert, "err", "Dosya adı zorunlu.");
-    return;
-  }
-
-  // teacherId assignment'tan gelir
-  const allSubs = load(KEY_SUBMISSIONS, []);
-  const item = {
-    id: uid("sub"),
-    classId: activeClassId,
-    assignmentId: a.id,
-    teacherId: a.teacherId,
-    studentId: me.id,
-    studentName: me.name || "Öğrenci",
-    course: a.course,
-    title: a.title,
-    fileName: f,
-    studentNote: note,
-    submittedAt: new Date().toISOString(),
-    status: "pending",
-    grade: "",
-    feedback: ""
-  };
-
-  allSubs.unshift(item);
-  saveSubmissions(allSubs);
-
-  setAlert(submitAlert, "ok", "Teslim edildi! Öğretmenin paneline düştü.");
-
-  if (fileName) fileName.value = "";
-  if (studentNote) studentNote.value = "";
-
-  refreshAll();
 }
 
-// ========= REFRESH =========
-function refreshAll(){
+// ========= refresh =========
+async function refreshAll(){
+  if (activeClassId) {
+    try {
+      assignmentsCache = await fetchAssignments(activeClassId);
+      mySubmissionsCache = await fetchMySubmissions(activeClassId);
+    } catch (e) {
+      console.error(e);
+      assignmentsCache = [];
+      mySubmissionsCache = [];
+    }
+  } else {
+    assignmentsCache = [];
+    mySubmissionsCache = [];
+  }
+
+  setActiveClassChip();
   renderKPIs();
   renderUpcoming();
   renderMyLastSubs();
   renderAssignments();
-
   fillAssignmentSelect();
   fillSubmitPanel();
-
   renderHistory();
 }
 
-// ========= BOOT / EVENTS =========
+// ========= events =========
 if (who) who.textContent = me?.name ? `👩‍🎓 ${me.name}` : "👩‍🎓 Öğrenci";
 
 if (logoutBtn) {
@@ -699,11 +637,10 @@ if (logoutBtn) {
 navBtns.forEach(b => b.addEventListener("click", () => setView(b.dataset.view)));
 
 if (classSelect) {
-  classSelect.addEventListener("change", () => {
+  classSelect.addEventListener("change", async () => {
     activeClassId = classSelect.value || null;
-    setActiveClassChip();
     clearSelection();
-    refreshAll();
+    await refreshAll();
   });
 }
 
@@ -729,23 +666,19 @@ if (joinForm) {
     clearAlert(joinAlert);
 
     const res = await joinByCode(classCode?.value);
-    if (!res.ok) {
-      setAlert(joinAlert, "err", res.msg);
-      return;
-    }
-    setAlert(joinAlert, "ok", res.msg);
+    if (!res.ok) return setAlert(joinAlert, "err", res.msg);
 
+    setAlert(joinAlert, "ok", res.msg);
     await fillClassSelect();
-    // yeni katıldığı sınıfı active yapmaya çalış
+
     const code = (classCode?.value || "").trim().toUpperCase();
-    const joined = myClasses().find(c => (c.code || "").toUpperCase() === code);
+    const joined = myClassesCache.find(c => (c.code || "").toUpperCase() === code);
     if (joined) {
       activeClassId = joined.id;
       if (classSelect) classSelect.value = activeClassId;
     }
-    setActiveClassChip();
-    refreshAll();
 
+    await refreshAll();
     setTimeout(() => closeModal(joinModal), 500);
   });
 }
@@ -766,15 +699,12 @@ if (searchTeacherBtn) {
     const q = teacherQuery?.value || "";
     if (!q.trim()) {
       setAlert(findAlert, "err", "Öğretmen adı yazmalısın.");
-      renderFoundClasses([]);
-      return;
+      return renderFoundClasses([]);
     }
-
     setAlert(findAlert, "ok", "Aranıyor...");
     const list = await searchClassesByTeacherName(q);
     if (!list.length) setAlert(findAlert, "err", "Sonuç bulunamadı.");
     else clearAlert(findAlert);
-
     renderFoundClasses(list);
   });
 }
@@ -782,18 +712,16 @@ if (searchTeacherBtn) {
 if (assignmentSelect) assignmentSelect.addEventListener("change", fillSubmitPanel);
 
 if (submitForm) {
-  submitForm.addEventListener("submit", (e) => {
+  submitForm.addEventListener("submit", async (e) => {
     e.preventDefault();
-    submitAssignment();
+    await submitAssignment();
   });
 }
 
-// ========= INIT =========
+// ========= init =========
 (async function boot(){
   await fillClassSelect();
-  setActiveClassChip();
   setView("dashboard");
   clearSelection();
-  refreshAll();
+  await refreshAll();
 })();
-

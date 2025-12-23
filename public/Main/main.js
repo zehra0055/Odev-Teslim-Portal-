@@ -132,7 +132,7 @@ function showAlert(msg, type = "ok") {
 }
 
 function isValidEmail(email) {
-  // basit ama sağlam bir kontrol
+  // basit ama sağlam bir kontrol 
   return /^[^\s@]+@[^\s@]+\.[^\s@]{2,}$/.test(email);
 }
 
