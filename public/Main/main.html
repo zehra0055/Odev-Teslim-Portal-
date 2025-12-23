@@ -1,0 +1,248 @@
+<!doctype html>
+<html lang="tr">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Ödev Teslim Portalı | Ana Sayfa</title>
+  <link rel="stylesheet" href="main.css" />
+  <script src="main.js" defer></script>
+</head>
+<body>
+  <!-- Background decoration -->
+  <div class="bg-blobs" aria-hidden="true">
+    <span class="blob b1"></span>
+    <span class="blob b2"></span>
+    <span class="blob b3"></span>
+  </div>
+
+  <!-- NAVBAR -->
+  <header class="nav">
+    <div class="container nav-inner">
+      <a class="brand" href="#top">
+        <span class="brand-icon">📘</span>
+        <span class="brand-title">Ödev Teslim Portalı</span>
+      </a>
+
+      <nav class="menu" id="menu">
+        <a href="#features">Özellikler</a>
+        <a href="#about">Hakkımızda</a>
+        <a href="#contact">İletişim</a>
+      </nav>
+
+      <div class="nav-actions">
+        <a class="btn ghost" href="../Ogrenci/ogrenci-giris.html">Öğrenci Girişi</a>
+        <a class="btn primary" href="../Ogretmen/ogretmen-giris.html">Öğretmen Girişi</a>
+        <button class="hamburger" id="hamburger" aria-label="Menü" type="button">☰</button>
+      </div>
+    </div>
+  </header>
+
+  <!-- HERO -->
+  <main class="container hero" id="top">
+    <section class="hero-left">
+      <div class="badge">✅ Hızlı • ✅ Güvenli • ✅ Düzenli</div>
+      <h1>Ödevlerini tek yerde topla, teslim et ve takip et.</h1>
+      <p class="lead">
+        Öğrenciler ödev yükleyebilir, öğretmenler ödevleri görüntüleyip değerlendirebilir.
+        Basit arayüz, kolay kullanım.
+      </p>
+
+      <div class="hero-cta">
+        <a class="btn primary" href="../Ogrenci/ogrenci-giris.html">Öğrenci Girişi</a>
+        <a class="btn ghost" href="../Ogretmen/ogretmen-giris.html">Öğretmen Girişi</a>
+        <a class="btn link" href="#about">Hakkımızda →</a>
+      </div>
+
+      <div class="hero-stats">
+        <div class="stat">
+          <div class="stat-num" id="stat1">0</div>
+          <div class="stat-label">Aktif Öğrenci</div>
+        </div>
+        <div class="stat">
+          <div class="stat-num" id="stat2">0</div>
+          <div class="stat-label">Teslim Edilen Ödev</div>
+        </div>
+        <div class="stat">
+          <div class="stat-num" id="stat3">0</div>
+          <div class="stat-label">Ortalama Değerlendirme</div>
+        </div>
+      </div>
+    </section>
+
+    <aside class="hero-right">
+      <div class="mock">
+        <div class="mock-top">
+          <span class="dot"></span><span class="dot"></span><span class="dot"></span>
+          <span class="mock-title">Panel Önizleme</span>
+        </div>
+
+        <div class="mock-body">
+          <div class="mock-cards">
+            <div class="mini-card">
+              <div class="mini-ico">📌</div>
+              <div>
+                <div class="mini-title">Aktif Ödevler</div>
+                <div class="mini-sub">Son teslim tarihleri</div>
+              </div>
+            </div>
+            <div class="mini-card">
+              <div class="mini-ico">📤</div>
+              <div>
+                <div class="mini-title">Dosya Yükleme</div>
+                <div class="mini-sub">Hızlı teslim</div>
+              </div>
+            </div>
+            <div class="mini-card">
+              <div class="mini-ico">📝</div>
+              <div>
+                <div class="mini-title">Notlandırma</div>
+                <div class="mini-sub">Geri bildirim</div>
+              </div>
+            </div>
+          </div>
+
+          <div class="mock-list">
+            <div class="list-title">Bugün</div>
+            <div class="list-item">
+              <span class="tag blue">Matematik</span>
+              <span class="li-text">Kareler ve Dikdörtgenler</span>
+              <span class="li-date">18:00</span>
+            </div>
+            <div class="list-item">
+              <span class="tag green">Tarih</span>
+              <span class="li-text">Proje Teslim</span>
+              <span class="li-date">23:59</span>
+            </div>
+            <div class="list-item">
+              <span class="tag orange">Fen</span>
+              <span class="li-text">Deney Raporu</span>
+              <span class="li-date">Yarın</span>
+            </div>
+          </div>
+        </div>
+      </div>
+    </aside>
+  </main>
+
+  <!-- FEATURES -->
+  <section class="section" id="features">
+    <div class="container">
+      <div class="section-head">
+        <h2>Özellikler</h2>
+        <p>Ödev teslim sürecini düzenleyen temel özellikler.</p>
+      </div>
+
+      <div class="grid-3">
+        <div class="feature-card">
+          <div class="f-ico">🗂️</div>
+          <h3>Ders Bazlı Yönetim</h3>
+          <p>Ödevleri derslere göre ayır, karışıklığı önle.</p>
+        </div>
+        <div class="feature-card">
+          <div class="f-ico">⏰</div>
+          <h3>Son Teslim Takibi</h3>
+          <p>Son teslim tarihlerini net gör, gecikmeleri azalt.</p>
+        </div>
+        <div class="feature-card">
+          <div class="f-ico">🔒</div>
+          <h3>Güvenli Giriş</h3>
+          <p>Öğrenci ve öğretmen rolleri ayrı, erişimler kontrollü.</p>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ABOUT -->
+  <section class="section alt" id="about">
+    <div class="container about">
+      <div class="about-left">
+        <h2>Hakkımızda</h2>
+        <p>
+          Ödev Teslim Portalı; öğrenci-öğretmen arasındaki teslim ve değerlendirme sürecini
+          tek bir ekranda toplayarak işleri kolaylaştırmak için tasarlandı.
+        </p>
+
+        <div class="bullets">
+          <div class="bullet"><span class="check">✓</span> Minimal ve anlaşılır arayüz</div>
+          <div class="bullet"><span class="check">✓</span> Dosya yükleme + notlandırma akışı</div>
+          <div class="bullet"><span class="check">✓</span> Duyuru ve geri bildirim mantığı</div>
+        </div>
+      </div>
+
+      <div class="about-right">
+        <div class="quote">
+          <div class="quote-mark">“</div>
+          <p>
+            Hedefimiz: ödevi bulmayı, teslim etmeyi ve takip etmeyi mümkün olduğunca basit hale getirmek.
+          </p>
+          <div class="quote-by">— Portal Ekibi</div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- CONTACT -->
+  <section class="section" id="contact">
+    <div class="container">
+      <div class="section-head">
+        <h2>İletişim</h2>
+        <p>Görüş/öneri bırak, birlikte geliştirelim.</p>
+      </div>
+
+      <div class="contact-wrap">
+        <form class="contact-form" id="contactForm" novalidate>
+          <div class="row">
+            <div class="field">
+              <label for="name">Ad Soyad</label>
+              <input id="name" type="text" placeholder="Adınız Soyadınız" />
+            </div>
+            <div class="field">
+              <label for="email">E-posta</label>
+              <input id="email" type="email" placeholder="ornek@mail.com" />
+            </div>
+          </div>
+
+          <div class="field">
+            <label for="message">Mesaj</label>
+            <textarea id="message" rows="5" placeholder="Mesajınızı yazın..."></textarea>
+          </div>
+
+          <button class="btn primary" type="submit">Gönder</button>
+          <div class="form-alert" id="formAlert" hidden></div>
+        </form>
+
+        <div class="contact-side">
+          <div class="side-card">
+            <div class="side-title">Hızlı Bilgi</div>
+            <div class="side-item"><span>📍</span> Okul / Kampüs / Kurum</div>
+            <div class="side-item"><span>📧</span> destek@odevportal.com</div>
+            <div class="side-item"><span>🕒</span> Hafta içi 09:00 - 18:00</div>
+          </div>
+
+          <div class="side-card">
+            <div class="side-title">Sık Sorulan</div>
+            <details>
+              <summary>Dosya türü sınırı var mı?</summary>
+              <p>İleride PDF/DOCX/ZIP gibi türler eklenebilir. Şimdilik tasarım demo.</p>
+            </details>
+            <details>
+              <summary>Öğretmen notu nasıl verir?</summary>
+              <p>Öğretmen panelinde “Görüntüle/Değerlendir” ekranı ile.</p>
+            </details>
+          </div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <footer class="footer">
+    <div class="container footer-inner">
+      <div class="foot-brand">
+        <span class="brand-icon">📘</span>
+        <span>Ödev Teslim Portalı</span>
+      </div>
+      <small>© 2025 Tüm Hakları Saklıdır</small>
+    </div>
+  </footer>
+</body>
+</html>

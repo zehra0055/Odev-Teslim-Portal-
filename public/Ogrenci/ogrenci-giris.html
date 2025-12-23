@@ -1,0 +1,274 @@
+<!doctype html>
+<html lang="tr">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Ödev Teslim Portalı | Öğrenci Girişi</title>
+
+  <link rel="stylesheet" href="ogrenci-giris.css" />
+  <script src="ogrenci-giris.js" defer></script>
+</head>
+
+<body>
+  <!-- Background decoration -->
+  <div class="bg-blobs" aria-hidden="true">
+    <span class="blob b1"></span>
+    <span class="blob b2"></span>
+    <span class="blob b3"></span>
+  </div>
+
+  <!-- Navbar -->
+  <header class="nav">
+    <div class="container nav-inner">
+      <a class="brand" href="../Main/main.html">
+        <span class="brand-icon">📘</span>
+        <span class="brand-title">Ödev Teslim Portalı</span>
+      </a>
+
+      <nav class="crumbs" aria-label="breadcrumb">
+        <a href="../Main/main.html">Ana Sayfa</a>
+        <span class="sep">/</span>
+        <span class="here">Öğrenci Girişi</span>
+      </nav>
+
+      <div class="nav-actions">
+        <a class="btn ghost" href="../Ogretmen/ogretmen-giris.html">Öğretmen Girişi</a>
+      </div>
+    </div>
+  </header>
+
+  <main class="container layout">
+    <!-- Sol: Auth -->
+    <section class="auth">
+      <div class="auth-head">
+        <div class="chip">👩‍🎓 Öğrenci Paneli</div>
+        <h1>Hoş geldin!</h1>
+        <p class="lead">Giriş yap veya hızlıca kayıt olup ödevlerini yönetmeye başla.</p>
+
+        <div class="tabs" role="tablist" aria-label="Giriş sekmeleri">
+          <button class="tab active" type="button" data-tab="login" role="tab" aria-selected="true">
+            Giriş Yap
+          </button>
+          <button class="tab" type="button" data-tab="register" role="tab" aria-selected="false">
+            Kayıt Ol
+          </button>
+        </div>
+      </div>
+
+      <div class="card">
+        <!-- LOGIN -->
+        <form class="form active" id="loginForm" data-form="login" novalidate>
+          <div class="form-row">
+            <div class="field">
+              <label for="loginEmail">E-posta</label>
+              <!-- ✅ JS uyumu: name="loginEmail" -->
+              <input id="loginEmail" name="loginEmail" type="email" placeholder="ornek@mail.com" autocomplete="email" />
+              <div class="msg" data-msg="email"></div>
+            </div>
+          </div>
+
+          <div class="form-row">
+            <div class="field">
+              <label for="loginPassword">Şifre</label>
+              <div class="input-wrap">
+                <!-- ✅ JS uyumu: name="loginPassword" -->
+                <input id="loginPassword" name="loginPassword" type="password" placeholder="••••••••" autocomplete="current-password" />
+                <button class="icon-btn" type="button" data-toggle-password aria-label="Şifreyi göster">👁️</button>
+              </div>
+
+              <div class="msg" data-msg="password"></div>
+              <div class="caps" id="capsWarn" hidden>Caps Lock açık görünüyor.</div>
+            </div>
+          </div>
+
+          <div class="between">
+            <label class="check">
+              <input type="checkbox" id="rememberMe" />
+              <span>Beni hatırla</span>
+            </label>
+
+            <button class="link" type="button" id="forgotBtn">Şifremi unuttum</button>
+          </div>
+
+          <button class="btn primary" type="submit" id="loginSubmit">
+            <span class="btn-text">Giriş Yap</span>
+            <span class="spinner" aria-hidden="true"></span>
+          </button>
+
+          <div class="alert" id="loginAlert" role="status" aria-live="polite" hidden></div>
+
+          <p class="muted-line">
+            Üye değil misin?
+            <button class="link" type="button" data-jump="register">Kayıt Ol</button>
+          </p>
+        </form>
+
+        <!-- REGISTER -->
+        <form class="form" id="registerForm" data-form="register" novalidate>
+          <div class="form-row two">
+            <div class="field">
+              <label for="regFirstName">Ad</label>
+              <!-- ✅ JS uyumu: name="regFirstName" -->
+              <input id="regFirstName" name="regFirstName" type="text" placeholder="Adınız" autocomplete="given-name" />
+              <div class="msg" data-msg="firstName"></div>
+            </div>
+            <div class="field">
+              <label for="regLastName">Soyad</label>
+              <!-- ✅ JS uyumu: name="regLastName" -->
+              <input id="regLastName" name="regLastName" type="text" placeholder="Soyadınız" autocomplete="family-name" />
+              <div class="msg" data-msg="lastName"></div>
+            </div>
+          </div>
+
+          <div class="form-row">
+            <div class="field">
+              <label for="regEmail">E-posta</label>
+              <!-- ✅ JS uyumu: name="regEmail" -->
+              <input id="regEmail" name="regEmail" type="email" placeholder="ornek@mail.com" autocomplete="email" />
+              <div class="msg" data-msg="email"></div>
+            </div>
+          </div>
+
+          <div class="form-row">
+            <div class="field">
+              <label for="regPassword">Şifre</label>
+              <div class="input-wrap">
+                <!-- ✅ JS uyumu: name="regPassword" -->
+                <input id="regPassword" name="regPassword" type="password" placeholder="En az 6 karakter" autocomplete="new-password" />
+                <button class="icon-btn" type="button" data-toggle-password aria-label="Şifreyi göster">🙈</button>
+              </div>
+
+              <div class="strength">
+                <div class="bar"><span id="strengthBar"></span></div>
+                <div class="strength-text" id="strengthText">Şifre gücü: —</div>
+              </div>
+
+              <div class="msg" data-msg="password"></div>
+            </div>
+          </div>
+
+          <div class="form-row">
+            <label class="check">
+              <input type="checkbox" id="terms" />
+              <span><a href="#" class="link" onclick="return false;">Şartları</a> okudum ve kabul ediyorum</span>
+            </label>
+            <div class="msg" data-msg="terms"></div>
+          </div>
+
+          <button class="btn primary" type="submit" id="regSubmit">
+            <span class="btn-text">Kayıt Ol</span>
+            <span class="spinner" aria-hidden="true"></span>
+          </button>
+
+          <div class="alert" id="regAlert" role="status" aria-live="polite" hidden></div>
+
+          <p class="muted-line">
+            Zaten üye misin?
+            <button class="link" type="button" data-jump="login">Giriş Yap</button>
+          </p>
+        </form>
+      </div>
+
+      <div class="mini-info">
+        <div class="info-card">
+          <div class="info-ico">📌</div>
+          <div>
+            <div class="info-title">Ödevlerini takip et</div>
+            <div class="info-sub">Son teslim tarihlerini kaçırma.</div>
+          </div>
+        </div>
+
+        <div class="info-card">
+          <div class="info-ico">📤</div>
+          <div>
+            <div class="info-title">Hızlı yükleme</div>
+            <div class="info-sub">Dosya adı + not ekle, gönder.</div>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- Sağ: Preview -->
+    <aside class="preview">
+      <div class="preview-card">
+        <div class="preview-top">
+          <span class="dot"></span><span class="dot"></span><span class="dot"></span>
+          <span class="preview-title">Öğrenci Paneli Önizleme</span>
+        </div>
+
+        <div class="preview-body">
+          <div class="welcome">
+            <div class="avatar">A</div>
+            <div>
+              <div class="w-title">Hoş geldin, <b>Ali</b> 👋</div>
+              <div class="w-sub">Bugün 2 aktif ödevin var.</div>
+            </div>
+          </div>
+
+          <div class="quick">
+            <div class="qcard">
+              <div class="qico">📚</div>
+              <div class="qt">Ödevlerim</div>
+              <div class="qs">Listeyi görüntüle</div>
+            </div>
+            <div class="qcard">
+              <div class="qico">📤</div>
+              <div class="qt">Ödev Yükle</div>
+              <div class="qs">Hızlı teslim</div>
+            </div>
+            <div class="qcard">
+              <div class="qico">📝</div>
+              <div class="qt">Notlarım</div>
+              <div class="qs">Son notlar</div>
+            </div>
+          </div>
+
+          <div class="panel-list">
+            <div class="panel-head">
+              <span>Aktif Ödevler</span>
+              <span class="pill">2</span>
+            </div>
+
+            <div class="item">
+              <span class="tag blue">Matematik</span>
+              <div class="itxt">
+                <div class="iname">Kareler ve Dikdörtgenler</div>
+                <div class="isub">Son: 18 Mayıs 2024</div>
+              </div>
+              <span class="arrow">›</span>
+            </div>
+
+            <div class="item">
+              <span class="tag green">Tarih</span>
+              <div class="itxt">
+                <div class="iname">Tarih Projesi</div>
+                <div class="isub">Son: 22 Mayıs 2024</div>
+              </div>
+              <span class="arrow">›</span>
+            </div>
+          </div>
+
+          <div class="tip">
+            <b>İpucu:</b> Dosya adını düzenli tut: <span class="mono">AdSoyad_Ders_Odev1</span>
+          </div>
+        </div>
+      </div>
+    </aside>
+  </main>
+
+  <!-- Modal -->
+  <div class="modal" id="modal" aria-hidden="true">
+    <div class="modal-card" role="dialog" aria-modal="true" aria-labelledby="modalTitle">
+      <div class="modal-top">
+        <div class="modal-title" id="modalTitle">Şifre Sıfırlama (Demo)</div>
+        <button class="icon-btn" id="closeModal" aria-label="Kapat" type="button">✕</button>
+      </div>
+      <p class="modal-text">
+        Normalde burada “şifre sıfırlama e-postası gönder” işlemi olur.
+        Şimdilik tasarım demo.
+      </p>
+      <button class="btn primary" id="okModal" type="button">Tamam</button>
+    </div>
+  </div>
+</body>
+</html>

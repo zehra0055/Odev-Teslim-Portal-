@@ -1,0 +1,313 @@
+<!doctype html>
+<html lang="tr">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Ödev Teslim Portalı | Öğrenci Paneli</title>
+  <link rel="stylesheet" href="ogrenci.css" />
+</head>
+<body>
+  <div class="bg-blobs" aria-hidden="true">
+    <span class="blob b1"></span>
+    <span class="blob b2"></span>
+    <span class="blob b3"></span>
+  </div>
+
+  <!-- TOP BAR -->
+  <header class="topbar">
+    <div class="wrap topbar-inner">
+      <a class="brand" href="../Main/main.html">
+        <span class="brand-icon">📘</span>
+        <span class="brand-title">Ödev Teslim Portalı</span>
+      </a>
+
+      <div class="top-actions">
+        <div class="who" id="who">👩‍🎓 Öğrenci</div>
+        <button class="btn ghost" id="logoutBtn">Çıkış</button>
+      </div>
+    </div>
+  </header>
+
+  <!-- APP -->
+  <main class="wrap app">
+    <!-- SIDEBAR -->
+    <aside class="sidebar">
+      <div class="side-card">
+        <div class="side-title">Sınıflarım</div>
+
+        <div class="class-picker">
+          <label class="lab" for="classSelect">Sınıf Seç</label>
+          <select id="classSelect"></select>
+          <div class="hint" id="classHint">Sınıf seçince ödevler ona göre değişir.</div>
+        </div>
+
+        <div class="class-actions">
+          <button class="btn primary" id="openJoin">➕ Sınıfa Katıl</button>
+          <button class="btn ghost" id="openFind">🔎 Öğretmen Ara</button>
+        </div>
+
+        <div class="split"></div>
+
+        <div class="nav">
+          <button class="navbtn active" data-view="dashboard">📊 Dashboard</button>
+          <button class="navbtn" data-view="assignments">📌 Ödevler</button>
+          <button class="navbtn" data-view="submit">📤 Teslim Et</button>
+          <button class="navbtn" data-view="history">🕘 Geçmiş</button>
+        </div>
+
+        <div class="mini">
+          <div class="mini-title">İpucu</div>
+          <div class="mini-text">
+            Sınıf kodunu öğretmeninden al: <b>6 haneli</b> (örn: <span class="mono">7F3K9A</span>)
+          </div>
+        </div>
+      </div>
+    </aside>
+
+    <!-- CONTENT -->
+    <section class="content">
+
+      <!-- DASHBOARD -->
+      <section class="view active" id="view-dashboard">
+        <div class="page-head">
+          <div>
+            <h1>Dashboard</h1>
+            <p class="muted">Seçili sınıfa ait hızlı özet.</p>
+          </div>
+          <div class="chip" id="activeClassChip">Sınıf: —</div>
+        </div>
+
+        <div class="cards-4">
+          <div class="kpi">
+            <div class="kpi-num" id="kpiMyClasses">0</div>
+            <div class="kpi-label">Katıldığın Sınıf</div>
+          </div>
+          <div class="kpi">
+            <div class="kpi-num" id="kpiActiveAssignments">0</div>
+            <div class="kpi-label">Aktif Ödev</div>
+          </div>
+          <div class="kpi">
+            <div class="kpi-num" id="kpiMySubmissions">0</div>
+            <div class="kpi-label">Teslimin</div>
+          </div>
+          <div class="kpi">
+            <div class="kpi-num" id="kpiGraded">0</div>
+            <div class="kpi-label">Notlandırıldı</div>
+          </div>
+        </div>
+
+        <div class="grid-2">
+          <div class="panel">
+            <div class="panel-title">Yaklaşan Ödevler</div>
+            <div class="panel-sub">Seçili sınıfın ödevleri.</div>
+            <div class="list" id="upcomingList"></div>
+            <div class="empty" id="emptyUpcoming" hidden>Bu sınıfta ödev yok.</div>
+            <button class="btn ghost block" id="goAssignments">Ödevler sayfasına git</button>
+          </div>
+
+          <div class="panel">
+            <div class="panel-title">Son Teslimlerin</div>
+            <div class="panel-sub">Seçili sınıfta yaptıkların.</div>
+            <div class="list" id="myLastSubs"></div>
+            <div class="empty" id="emptyMyLast" hidden>Henüz teslim yok.</div>
+            <button class="btn ghost block" id="goHistory">Geçmişe git</button>
+          </div>
+        </div>
+      </section>
+
+      <!-- ASSIGNMENTS -->
+      <section class="view" id="view-assignments">
+        <div class="page-head">
+          <div>
+            <h1>Ödevler</h1>
+            <p class="muted">Seçili sınıfın ödev listesi.</p>
+          </div>
+          <div class="chip" id="assClassChip">Sınıf: —</div>
+        </div>
+
+        <div class="panel">
+          <div class="panel-title">Ödev Listesi</div>
+          <div class="panel-sub">Teslim etmek için “Teslim Et” sayfasına geç.</div>
+
+          <div class="list" id="assignmentList"></div>
+          <div class="empty" id="emptyAssignments" hidden>Henüz ödev yok.</div>
+        </div>
+      </section>
+
+      <!-- SUBMIT -->
+      <section class="view" id="view-submit">
+        <div class="page-head">
+          <div>
+            <h1>Teslim Et</h1>
+            <p class="muted">Ödev seç, dosya adını yaz, not ekle, gönder.</p>
+          </div>
+          <div class="chip" id="subClassChip">Sınıf: —</div>
+        </div>
+
+        <div class="grid-2">
+          <div class="panel">
+            <div class="panel-title">Ödev Seç</div>
+            <div class="panel-sub">Seçili sınıftaki ödevlerden birini seç.</div>
+
+            <div class="field">
+              <label for="assignmentSelect">Ödev</label>
+              <select id="assignmentSelect"></select>
+            </div>
+
+            <div class="empty" id="emptyAssignSelect" hidden>Bu sınıfta ödev yok. Öğretmen ödev açınca burada görünür.</div>
+
+            <div class="split"></div>
+
+            <div class="tip">
+              <b>Dosya adı önerisi:</b> <span class="mono">AdSoyad_Ders_Odev1.pdf</span>
+            </div>
+          </div>
+
+          <div class="panel">
+            <div class="panel-title">Teslim Bilgisi</div>
+            <div class="panel-sub">Bu demo sürümde gerçek dosya yükleme yok, sadece “dosya adı” alıyoruz.</div>
+
+            <form id="submitForm" class="form">
+              <div class="field">
+                <label for="fileName">Dosya Adı</label>
+                <input id="fileName" type="text" placeholder="Örn: AliYilmaz_Mat_Odev1.pdf" />
+              </div>
+
+              <div class="field">
+                <label for="studentNote">Öğrenci Notu (opsiyonel)</label>
+                <textarea id="studentNote" rows="4" placeholder="Kısa not..."></textarea>
+              </div>
+
+              <button class="btn primary" type="submit">Teslim Et</button>
+              <div class="alert" id="submitAlert" hidden></div>
+            </form>
+          </div>
+        </div>
+      </section>
+
+      <!-- HISTORY -->
+      <section class="view" id="view-history">
+        <div class="page-head">
+          <div>
+            <h1>Geçmiş</h1>
+            <p class="muted">Seçili sınıftaki teslimlerin ve durumları.</p>
+          </div>
+          <div class="chip" id="histClassChip">Sınıf: —</div>
+        </div>
+
+        <div class="grid-2">
+          <div class="panel">
+            <div class="panel-title">Teslimlerim</div>
+            <div class="panel-sub">Bir teslimi seçerek detayını gör.</div>
+
+            <div class="row two">
+              <div class="field">
+                <label for="filterCourse">Ders Filtre</label>
+                <input id="filterCourse" type="text" placeholder="Örn: Matematik" />
+              </div>
+              <div class="field">
+                <label for="filterStatus">Durum</label>
+                <select id="filterStatus">
+                  <option value="all">Hepsi</option>
+                  <option value="pending">Bekliyor</option>
+                  <option value="graded">Notlandırıldı</option>
+                </select>
+              </div>
+            </div>
+
+            <div class="list" id="historyList"></div>
+            <div class="empty" id="emptyHistory" hidden>Henüz teslim yok.</div>
+          </div>
+
+          <div class="panel">
+            <div class="panel-title">Detay</div>
+            <div class="panel-sub">Soldan bir teslim seç.</div>
+
+            <div class="detail" id="detailEmpty">
+              <div class="empty big">Soldan bir teslim seç.</div>
+            </div>
+
+            <div class="detail" id="detailBox" hidden>
+              <div class="detail-top">
+                <div>
+                  <div class="d-title" id="dTitle">—</div>
+                  <div class="d-sub" id="dSub">—</div>
+                </div>
+                <span class="pill" id="dStatus">Bekliyor</span>
+              </div>
+
+              <div class="kv">
+                <div class="k">Dosya</div>
+                <div class="v mono" id="dFile">—</div>
+              </div>
+              <div class="kv">
+                <div class="k">Teslim</div>
+                <div class="v" id="dDate">—</div>
+              </div>
+              <div class="kv">
+                <div class="k">Not</div>
+                <div class="v" id="dGrade">—</div>
+              </div>
+              <div class="kv">
+                <div class="k">Geri Bildirim</div>
+                <div class="v" id="dFeedback">—</div>
+              </div>
+
+              <button class="btn ghost block" id="clearSelectionBtn" type="button">Seçimi Kapat</button>
+            </div>
+          </div>
+        </div>
+      </section>
+
+    </section>
+  </main>
+
+  <!-- MODAL: Join by code -->
+  <div class="modal" id="joinModal" aria-hidden="true">
+    <div class="modal-card" role="dialog" aria-modal="true" aria-labelledby="joinTitle">
+      <div class="modal-top">
+        <div class="modal-title" id="joinTitle">Sınıfa Katıl (Kod ile)</div>
+        <button class="icon-btn" data-close="joinModal" aria-label="Kapat">✕</button>
+      </div>
+
+      <form id="joinForm" class="form">
+        <div class="field">
+          <label for="classCode">Sınıf Kodu</label>
+          <input id="classCode" type="text" placeholder="Örn: 7F3K9A" maxlength="6" />
+        </div>
+
+        <button class="btn primary" type="submit">Katıl</button>
+        <div class="alert" id="joinAlert" hidden></div>
+      </form>
+    </div>
+  </div>
+
+  <!-- MODAL: Find teacher -->
+  <div class="modal" id="findModal" aria-hidden="true">
+    <div class="modal-card" role="dialog" aria-modal="true" aria-labelledby="findTitle">
+      <div class="modal-top">
+        <div class="modal-title" id="findTitle">Öğretmen Ara</div>
+        <button class="icon-btn" data-close="findModal" aria-label="Kapat">✕</button>
+      </div>
+
+      <div class="panel-in-modal">
+        <div class="field">
+          <label for="teacherQuery">Öğretmen Adı</label>
+          <input id="teacherQuery" type="text" placeholder="Örn: Ayşe" />
+        </div>
+
+        <button class="btn ghost block" id="searchTeacherBtn" type="button">Ara</button>
+
+        <div class="split"></div>
+
+        <div class="list" id="foundClassList"></div>
+        <div class="empty" id="emptyFound" hidden>Sonuç yok.</div>
+
+        <div class="alert" id="findAlert" hidden></div>
+      </div>
+    </div>
+  </div>
+
+  <script src="ogrenci.js"></script>
+</body>
+</html>

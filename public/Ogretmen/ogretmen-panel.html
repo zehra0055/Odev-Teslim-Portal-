@@ -1,0 +1,368 @@
+<!doctype html>
+<html lang="tr">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Ödev Teslim Portalı | Öğretmen Paneli</title>
+  <link rel="stylesheet" href="ogretmen.css" />
+</head>
+<body>
+  <div class="bg-blobs" aria-hidden="true">
+    <span class="blob b1"></span>
+    <span class="blob b2"></span>
+    <span class="blob b3"></span>
+  </div>
+
+  <!-- TOP BAR -->
+  <header class="topbar">
+    <div class="wrap topbar-inner">
+      <a class="brand" href="../Main/main.html">
+        <span class="brand-icon">📘</span>
+        <span class="brand-title">Ödev Teslim Portalı</span>
+      </a>
+
+      <div class="top-actions">
+        <div class="who" id="who">👨‍🏫 Öğretmen</div>
+        <button class="btn ghost" id="logoutBtn">Çıkış</button>
+      </div>
+    </div>
+  </header>
+
+  <!-- APP LAYOUT -->
+  <main class="wrap app">
+    <!-- SIDEBAR -->
+    <aside class="sidebar">
+      <div class="side-card">
+        <div class="side-title">Sınıflar</div>
+
+        <div class="class-picker">
+          <label class="lab" for="classSelect">Sınıf Seç</label>
+          <select id="classSelect"></select>
+          <div class="hint" id="classHint">Sınıf seçince her şey ona göre filtrelenir.</div>
+        </div>
+
+        <div class="class-actions">
+          <button class="btn primary" id="openCreateClass">➕ Yeni Sınıf</button>
+          <button class="btn ghost" id="openClassInfo">🔎 Kod / Bilgi</button>
+        </div>
+
+        <div class="split"></div>
+
+        <div class="nav">
+          <button class="navbtn active" data-view="dashboard">📊 Dashboard</button>
+          <button class="navbtn" data-view="assignments">📌 Ödevler</button>
+          <button class="navbtn" data-view="submissions">📥 Teslimler</button>
+          <button class="navbtn" data-view="students">👥 Öğrenciler</button>
+        </div>
+
+        <div class="mini">
+          <div class="mini-title">İpucu</div>
+          <div class="mini-text">
+            Öğrenciler sınıfa katılmak için <b>Sınıf Kodu</b> kullanır.
+          </div>
+        </div>
+      </div>
+    </aside>
+
+    <!-- CONTENT -->
+    <section class="content">
+      <!-- DASHBOARD -->
+      <section class="view active" id="view-dashboard">
+        <div class="page-head">
+          <div>
+            <h1>Dashboard</h1>
+            <p class="muted">Seçili sınıfa ait özet durum.</p>
+          </div>
+          <div class="chip" id="activeClassChip">Sınıf: —</div>
+        </div>
+
+        <div class="cards-4">
+          <div class="kpi">
+            <div class="kpi-num" id="kpiStudents">0</div>
+            <div class="kpi-label">Öğrenci</div>
+          </div>
+          <div class="kpi">
+            <div class="kpi-num" id="kpiAssignments">0</div>
+            <div class="kpi-label">Aktif Ödev</div>
+          </div>
+          <div class="kpi">
+            <div class="kpi-num" id="kpiSubmissions">0</div>
+            <div class="kpi-label">Toplam Teslim</div>
+          </div>
+          <div class="kpi">
+            <div class="kpi-num" id="kpiPending">0</div>
+            <div class="kpi-label">Bekleyen</div>
+          </div>
+        </div>
+
+        <div class="grid-2">
+          <div class="panel">
+            <div class="panel-title">Hızlı Ödev Oluştur</div>
+            <div class="panel-sub">Ödev seçili sınıfa açılır.</div>
+
+            <form id="quickAssignmentForm" class="form">
+              <div class="row two">
+                <div class="field">
+                  <label for="qaCourse">Ders</label>
+                  <input id="qaCourse" type="text" placeholder="Örn: Matematik" />
+                </div>
+                <div class="field">
+                  <label for="qaDue">Son Tarih</label>
+                  <input id="qaDue" type="date" />
+                </div>
+              </div>
+
+              <div class="field">
+                <label for="qaTitle">Başlık</label>
+                <input id="qaTitle" type="text" placeholder="Örn: Kareler ve Dikdörtgenler" />
+              </div>
+
+              <div class="field">
+                <label for="qaDesc">Açıklama</label>
+                <textarea id="qaDesc" rows="4" placeholder="Kısa açıklama..."></textarea>
+              </div>
+
+              <button class="btn primary" type="submit">Ödevi Oluştur</button>
+              <div class="alert" id="qaAlert" hidden></div>
+            </form>
+          </div>
+
+          <div class="panel">
+            <div class="panel-title">Son Teslimler</div>
+            <div class="panel-sub">Yeni gelenleri hızlıca gör.</div>
+
+            <div class="list" id="lastSubmissions"></div>
+            <div class="empty" id="emptyLast" hidden>Henüz teslim yok.</div>
+
+            <button class="btn ghost block" id="goSubmissions">Teslimler sayfasına git</button>
+          </div>
+        </div>
+      </section>
+
+      <!-- ASSIGNMENTS -->
+      <section class="view" id="view-assignments">
+        <div class="page-head">
+          <div>
+            <h1>Ödevler</h1>
+            <p class="muted">Seçili sınıfa ait ödevleri yönet.</p>
+          </div>
+          <div class="chip" id="assignClassChip">Sınıf: —</div>
+        </div>
+
+        <div class="grid-2">
+          <div class="panel">
+            <div class="panel-title">Yeni Ödev Oluştur</div>
+            <div class="panel-sub">Ödev seçili sınıfa kaydolur.</div>
+
+            <form id="assignmentForm" class="form">
+              <div class="row two">
+                <div class="field">
+                  <label for="aCourse">Ders</label>
+                  <input id="aCourse" type="text" placeholder="Örn: Tarih" />
+                </div>
+                <div class="field">
+                  <label for="aDue">Son Tarih</label>
+                  <input id="aDue" type="date" />
+                </div>
+              </div>
+
+              <div class="field">
+                <label for="aTitle">Başlık</label>
+                <input id="aTitle" type="text" placeholder="Örn: Tarih Projesi" />
+              </div>
+
+              <div class="field">
+                <label for="aDesc">Açıklama</label>
+                <textarea id="aDesc" rows="5" placeholder="İstenenler, kurallar..."></textarea>
+              </div>
+
+              <button class="btn primary" type="submit">Kaydet</button>
+              <div class="alert" id="aAlert" hidden></div>
+            </form>
+          </div>
+
+          <div class="panel">
+            <div class="panel-title">Ödev Listesi</div>
+            <div class="panel-sub">Seçili sınıfın ödevleri.</div>
+
+            <div class="list" id="assignmentList"></div>
+            <div class="empty" id="emptyAssignments" hidden>Henüz ödev yok.</div>
+          </div>
+        </div>
+      </section>
+
+      <!-- SUBMISSIONS -->
+      <section class="view" id="view-submissions">
+        <div class="page-head">
+          <div>
+            <h1>Teslimler</h1>
+            <p class="muted">Gelen teslimleri değerlendir.</p>
+          </div>
+          <div class="chip" id="subClassChip">Sınıf: —</div>
+        </div>
+
+        <div class="grid-2">
+          <div class="panel">
+            <div class="panel-title">Teslim Listesi</div>
+            <div class="panel-sub">Filtrele ve seç.</div>
+
+            <div class="row two">
+              <div class="field">
+                <label for="filterCourse">Ders Filtre</label>
+                <input id="filterCourse" type="text" placeholder="Örn: Matematik" />
+              </div>
+              <div class="field">
+                <label for="filterStatus">Durum</label>
+                <select id="filterStatus">
+                  <option value="all">Hepsi</option>
+                  <option value="pending">Bekliyor</option>
+                  <option value="graded">Notlandırıldı</option>
+                </select>
+              </div>
+            </div>
+
+            <div class="list" id="submissionList"></div>
+            <div class="empty" id="emptySubmissions" hidden>Henüz teslim yok.</div>
+          </div>
+
+          <div class="panel">
+            <div class="panel-title">Değerlendirme</div>
+            <div class="panel-sub">Bir teslim seç.</div>
+
+            <div class="detail" id="detailEmpty">
+              <div class="empty big">Soldan bir teslim seç.</div>
+            </div>
+
+            <div class="detail" id="detailBox" hidden>
+              <div class="detail-top">
+                <div>
+                  <div class="d-title" id="dTitle">—</div>
+                  <div class="d-sub" id="dSub">—</div>
+                </div>
+                <span class="pill" id="dStatus">Bekliyor</span>
+              </div>
+
+              <div class="kv">
+                <div class="k">Öğrenci</div>
+                <div class="v" id="dStudent">—</div>
+              </div>
+              <div class="kv">
+                <div class="k">Ders</div>
+                <div class="v" id="dCourse">—</div>
+              </div>
+              <div class="kv">
+                <div class="k">Dosya</div>
+                <div class="v mono" id="dFile">—</div>
+              </div>
+              <div class="kv">
+                <div class="k">Teslim Tarihi</div>
+                <div class="v" id="dDate">—</div>
+              </div>
+
+              <div class="row two">
+                <div class="field">
+                  <label for="gradeInput">Not (0-100)</label>
+                  <input id="gradeInput" type="number" min="0" max="100" placeholder="Örn: 85" />
+                </div>
+                <div class="field">
+                  <label for="statusInput">Durum</label>
+                  <select id="statusInput">
+                    <option value="pending">Bekliyor</option>
+                    <option value="graded">Notlandırıldı</option>
+                  </select>
+                </div>
+              </div>
+
+              <div class="field">
+                <label for="feedbackInput">Geri Bildirim</label>
+                <textarea id="feedbackInput" rows="5" placeholder="Kısa yorum..."></textarea>
+              </div>
+
+              <div class="row two">
+                <button class="btn primary" id="saveReviewBtn" type="button">Kaydet</button>
+                <button class="btn ghost" id="clearSelectionBtn" type="button">Seçimi Kapat</button>
+              </div>
+
+              <div class="alert" id="reviewAlert" hidden></div>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <!-- STUDENTS -->
+      <section class="view" id="view-students">
+        <div class="page-head">
+          <div>
+            <h1>Öğrenciler</h1>
+            <p class="muted">Seçili sınıfa katılan öğrenciler.</p>
+          </div>
+          <div class="chip" id="studClassChip">Sınıf: —</div>
+        </div>
+
+        <div class="panel">
+          <div class="panel-title">Sınıf Üyeleri</div>
+          <div class="panel-sub">Öğrenciler kodla katıldıkça burada görünür.</div>
+
+          <div class="list" id="studentList"></div>
+          <div class="empty" id="emptyStudents" hidden>Bu sınıfta henüz öğrenci yok.</div>
+        </div>
+      </section>
+    </section>
+  </main>
+
+  <!-- MODAL: Create Class -->
+  <div class="modal" id="createClassModal" aria-hidden="true">
+    <div class="modal-card" role="dialog" aria-modal="true" aria-labelledby="createClassTitle">
+      <div class="modal-top">
+        <div class="modal-title" id="createClassTitle">Yeni Sınıf Oluştur</div>
+        <button class="icon-btn" data-close="createClassModal" aria-label="Kapat">✕</button>
+      </div>
+
+      <form id="createClassForm" class="form">
+        <div class="field">
+          <label for="className">Sınıf Adı</label>
+          <input id="className" type="text" placeholder="Örn: 11-A / Yazılım 1 / Matematik Grubu" />
+        </div>
+
+        <div class="field">
+          <label for="classDesc">Açıklama (opsiyonel)</label>
+          <textarea id="classDesc" rows="4" placeholder="Kısa not..."></textarea>
+        </div>
+
+        <button class="btn primary" type="submit">Oluştur</button>
+        <div class="alert" id="classCreateAlert" hidden></div>
+      </form>
+    </div>
+  </div>
+
+  <!-- MODAL: Class Info -->
+  <div class="modal" id="classInfoModal" aria-hidden="true">
+    <div class="modal-card" role="dialog" aria-modal="true" aria-labelledby="classInfoTitle">
+      <div class="modal-top">
+        <div class="modal-title" id="classInfoTitle">Sınıf Bilgisi</div>
+        <button class="icon-btn" data-close="classInfoModal" aria-label="Kapat">✕</button>
+      </div>
+
+      <div class="info-box">
+        <div class="info-row">
+          <div class="info-k">Sınıf</div>
+          <div class="info-v" id="infoClassName">—</div>
+        </div>
+        <div class="info-row">
+          <div class="info-k">Kod</div>
+          <div class="info-v mono" id="infoClassCode">—</div>
+        </div>
+        <div class="info-row">
+          <div class="info-k">Açıklama</div>
+          <div class="info-v" id="infoClassDesc">—</div>
+        </div>
+
+        <button class="btn ghost block" id="copyClassCode">Kodu Kopyala</button>
+        <div class="alert" id="copyAlert" hidden></div>
+      </div>
+    </div>
+  </div>
+
+  <script src="ogretmen.js"></script>
+</body>
+</html>
